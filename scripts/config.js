@@ -63,8 +63,8 @@ const CLIFFORD_SAMPLES = 500; // pre-computed points
 const SIGIL_NORMAL    = 0;
 const SIGIL_FORMING   = 1;
 const SIGIL_FORMED    = 2;
-const SIGIL_DISSOLVING= 3;
-const SIGIL_DETONATING= 4;
+const SIGIL_DISSOLVING = 3;
+const SIGIL_DETONATING = 4;
 
 // Base layer velocities (pixels/ms in screen space — applied during init)
 const LAYER_BASE_VX = [0.01, 0.025, 0.05];
