@@ -31,6 +31,6 @@ jobs:
             --exclude 'docs/' \
             --exclude 'deploy.sh' \
             index.html \
-            styles/ \
-            scripts/ \
+            styles \
+            scripts \
             REDACTED_USER@REDACTED_HOST:REDACTED_PATH/
