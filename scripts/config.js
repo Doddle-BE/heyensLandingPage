@@ -36,11 +36,35 @@ const FIELD_ALPHA = 5;
 const FIELD_LAYER = 6;
 const FIELD_PHASE = 7;
 
-// Reserved — Phase 2 JH sigil (initialized to 0, unused in Phase 1)
+// Phase 2 — Clifford attractor sigil fields
 const FIELD_TARGET_X = 8;
 const FIELD_TARGET_Y = 9;
 const FIELD_MODE     = 10;
 const FIELD_TIMER    = 11;
+
+// Sigil — Clifford attractor parameters
+const SIGIL_IDLE_MS      = 4000;   // ms of no cursor movement before sigil forms
+const SIGIL_STAR_COUNT   = 250;    // stars assigned to sigil
+const SIGIL_SPRING_K     = 0.003;  // spring stiffness (per ms²)
+const SIGIL_DAMPING      = 0.92;   // velocity damping per frame
+const SIGIL_SETTLE_VEL   = 0.05;   // px/ms threshold to consider a star settled
+const SIGIL_DISSOLVE_MS  = 1000;   // ms for dissolve drift back to normal
+const SIGIL_BBOX_W       = 400;    // attractor bounding box width in CSS px
+const SIGIL_BBOX_H       = 300;    // attractor bounding box height in CSS px
+
+// Clifford attractor parameters — produces a dense asymmetric shape
+const CLIFFORD_A = -1.4;
+const CLIFFORD_B =  1.6;
+const CLIFFORD_C =  1.0;
+const CLIFFORD_D =  0.7;
+const CLIFFORD_SAMPLES = 500; // pre-computed points
+
+// Sigil state enum
+const SIGIL_NORMAL    = 0;
+const SIGIL_FORMING   = 1;
+const SIGIL_FORMED    = 2;
+const SIGIL_DISSOLVING= 3;
+const SIGIL_DETONATING= 4;
 
 // Base layer velocities (pixels/ms in screen space — applied during init)
 const LAYER_BASE_VX = [0.01, 0.025, 0.05];
