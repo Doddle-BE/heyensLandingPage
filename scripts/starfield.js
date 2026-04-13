@@ -117,9 +117,12 @@ function sfUpdate(mouse, activeCount, dt) {
 
       // Edge recycling — skip sigil-assigned stars (they spring back on their own)
       if ((nsx < 0 || nsx > canvasW || nsy < 0 || nsy > canvasH) && pool[base + FIELD_MODE] === 0) {
-        // Re-enter at opposite edge in world space
-        pool[base + FIELD_X] = (Math.random() - 0.5) * canvasW * 2;
-        pool[base + FIELD_Y] = (Math.random() - 0.5) * canvasH * 2;
+        // Re-enter from depth. World-space range must scale with Z_FAR/FOCAL_LENGTH
+        // so recycled stars project across the full screen — not just the center band.
+        // At Z_FAR a naive ±canvasW range only covers ±(FOCAL_LENGTH/Z_FAR) of screen width.
+        const spawnScale = Z_FAR / FOCAL_LENGTH;
+        pool[base + FIELD_X] = (Math.random() - 0.5) * canvasW * spawnScale;
+        pool[base + FIELD_Y] = (Math.random() - 0.5) * canvasH * spawnScale;
         pool[base + FIELD_Z] = Z_FAR;
         pool[base + FIELD_VX] = (Math.random() - 0.5) * LAYER_BASE_VX[layer] * 2;
         pool[base + FIELD_VY] = (Math.random() - 0.5) * LAYER_BASE_VY[layer] * 2;

@@ -23,20 +23,23 @@
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    // Read CSS-computed size (position:fixed; width:100%; height:100%) so JS
+    // and CSS are always in sync — avoids a conflict where the browser updates
+    // the CSS layout (e.g. mobile address bar show/hide) while the JS inline
+    // style holds a stale snapshot, triggering an unnecessary full reinit.
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
     canvas.width  = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
-    canvas.style.width  = w + 'px';
-    canvas.style.height = h + 'px';
     // setTransform replaces matrix — safe to call repeatedly on resize
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { w, h };
   }
 
   function init() {
-    setupCanvas();
-    sfInit(window.innerWidth, window.innerHeight);
-    sigilInit(window.innerWidth, window.innerHeight);
+    const { w, h } = setupCanvas();
+    sfInit(w, h);
+    sigilInit(w, h);
     inputBind();
   }
 
@@ -98,9 +101,9 @@
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      setupCanvas();
-      sfInit(window.innerWidth, window.innerHeight);
-      sigilInit(window.innerWidth, window.innerHeight);
+      const { w, h } = setupCanvas();
+      sfInit(w, h);
+      sigilInit(w, h);
       activeCount = [...STAR_COUNT];
       isReduced = false;
       slowFrameCount = 0;
