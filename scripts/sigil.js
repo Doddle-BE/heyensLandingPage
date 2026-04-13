@@ -35,9 +35,9 @@ function _assignStars() {
     }
   }
 
-  const chosen = new Int32Array(SIGIL_STAR_COUNT);
   // Reservoir-sample SIGIL_STAR_COUNT from candidates (Fisher-Yates partial)
   const n = Math.min(SIGIL_STAR_COUNT, candidates.length);
+  const chosen = new Int32Array(n);
   for (let i = 0; i < n; i++) {
     const j = i + Math.floor(Math.random() * (candidates.length - i));
     const tmp = candidates[i]; candidates[i] = candidates[j]; candidates[j] = tmp;
@@ -75,6 +75,8 @@ function _releaseSigilStars() {
 function _springStep(dt) {
   if (!_sigilStars) return true;
   let allSettled = true;
+  const halfW = _canvasW * 0.5;
+  const halfH = _canvasH * 0.5;
 
   for (let i = 0; i < _sigilStars.length; i++) {
     const base  = _sigilStars[i] * FIELDS;
@@ -82,8 +84,6 @@ function _springStep(dt) {
     if (z <= 0) continue;
 
     // Current screen position
-    const halfW = _canvasW * 0.5;
-    const halfH = _canvasH * 0.5;
     const sx = (pool[base + FIELD_X] / z) * FOCAL_LENGTH + halfW;
     const sy = (pool[base + FIELD_Y] / z) * FOCAL_LENGTH + halfH;
 
@@ -157,7 +157,7 @@ function sigilUpdate(mouse, dt, cursorMoved) {
       }
       break;
 
-    case SIGIL_FORMING:
+    case SIGIL_FORMING: {
       if (cursorMoved) {
         _releaseSigilStars();
         _state = SIGIL_NORMAL;
@@ -167,6 +167,7 @@ function sigilUpdate(mouse, dt, cursorMoved) {
       const settled = _springStep(dt);
       if (settled) _state = SIGIL_FORMED;
       break;
+    }
 
     case SIGIL_FORMED:
       if (cursorMoved) {
