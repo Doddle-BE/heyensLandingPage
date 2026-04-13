@@ -18,6 +18,8 @@
   let cleanFrameCount = 0;
   let isReduced = false;
   let activeCount = [...STAR_COUNT]; // mutable loop cap — no pool reinit on fallback
+  let _prevMouseX = 0;
+  let _prevMouseY = 0;
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -34,6 +36,7 @@
   function init() {
     setupCanvas();
     sfInit(window.innerWidth, window.innerHeight);
+    sigilInit(window.innerWidth, window.innerHeight);
     inputBind();
   }
 
@@ -74,6 +77,11 @@
     }
 
     const mouse = getMouseState();
+    const cursorMoved = (mouse.x !== _prevMouseX || mouse.y !== _prevMouseY);
+    _prevMouseX = mouse.x;
+    _prevMouseY = mouse.y;
+
+    sigilUpdate(mouse, dt, cursorMoved);
     sfUpdate(mouse, activeCount, dt);
     sfRender(ctx, activeCount);
 
@@ -92,6 +100,7 @@
     resizeTimer = setTimeout(() => {
       setupCanvas();
       sfInit(window.innerWidth, window.innerHeight);
+      sigilInit(window.innerWidth, window.innerHeight);
       activeCount = [...STAR_COUNT];
       isReduced = false;
       slowFrameCount = 0;
