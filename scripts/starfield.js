@@ -115,8 +115,8 @@ function sfUpdate(mouse, activeCount, dt) {
       const nsx = (pool[base + FIELD_X] / z) * FOCAL_LENGTH + halfW;
       const nsy = (pool[base + FIELD_Y] / z) * FOCAL_LENGTH + halfH;
 
-      // Edge recycling
-      if (nsx < 0 || nsx > canvasW || nsy < 0 || nsy > canvasH) {
+      // Edge recycling — skip sigil-assigned stars (they spring back on their own)
+      if ((nsx < 0 || nsx > canvasW || nsy < 0 || nsy > canvasH) && pool[base + FIELD_MODE] === 0) {
         // Re-enter at opposite edge in world space
         pool[base + FIELD_X] = (Math.random() - 0.5) * canvasW * 2;
         pool[base + FIELD_Y] = (Math.random() - 0.5) * canvasH * 2;

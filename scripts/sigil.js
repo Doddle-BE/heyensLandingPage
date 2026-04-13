@@ -5,6 +5,7 @@
 // Module state
 let _state       = SIGIL_NORMAL;
 let _idleMs      = 0;          // accumulated idle time
+let _formingMs   = 0;          // ms spent in SIGIL_FORMING state
 let _sigilStars  = null;       // Int32Array of flat star indices assigned to sigil
 let _points      = null;       // pre-computed attractor points (from attractor.js)
 let _canvasW     = 0;
@@ -15,8 +16,9 @@ function sigilInit(canvasW, canvasH) {
   _canvasW = canvasW;
   _canvasH = canvasH;
   _points  = buildCliffordPoints(SIGIL_BBOX_W, SIGIL_BBOX_H);
-  _state   = SIGIL_NORMAL;
-  _idleMs  = 0;
+  _state      = SIGIL_NORMAL;
+  _idleMs     = 0;
+  _formingMs  = 0;
   _sigilStars = null;
 }
 
@@ -90,12 +92,14 @@ function _springStep(dt) {
     const tx = pool[base + FIELD_TARGET_X];
     const ty = pool[base + FIELD_TARGET_Y];
 
-    // Spring force in screen space, then convert back to world via inverse projection
-    const fx = (tx - sx) * SIGIL_SPRING_K * dt;
-    const fy = (ty - sy) * SIGIL_SPRING_K * dt;
+    // Spring force: screen-space error converted to world-space via inverse projection
+    const fx = (tx - sx) * SIGIL_SPRING_K * dt * (z / FOCAL_LENGTH);
+    const fy = (ty - sy) * SIGIL_SPRING_K * dt * (z / FOCAL_LENGTH);
 
     pool[base + FIELD_VX] = (pool[base + FIELD_VX] + fx) * SIGIL_DAMPING;
     pool[base + FIELD_VY] = (pool[base + FIELD_VY] + fy) * SIGIL_DAMPING;
+    pool[base + FIELD_VX] = Math.max(-MAX_STAR_VEL, Math.min(MAX_STAR_VEL, pool[base + FIELD_VX]));
+    pool[base + FIELD_VY] = Math.max(-MAX_STAR_VEL, Math.min(MAX_STAR_VEL, pool[base + FIELD_VY]));
 
     const speed = Math.sqrt(
       pool[base + FIELD_VX] * pool[base + FIELD_VX] +
@@ -113,13 +117,14 @@ function _detonate() {
   const cx = _canvasW * 0.5;
   const cy = _canvasH * 0.5;
 
+  const halfW = _canvasW * 0.5;
+  const halfH = _canvasH * 0.5;
+
   for (let i = 0; i < _sigilStars.length; i++) {
     const base = _sigilStars[i] * FIELDS;
     const z    = pool[base + FIELD_Z];
     if (z <= 0) continue;
 
-    const halfW = _canvasW * 0.5;
-    const halfH = _canvasH * 0.5;
     const sx = (pool[base + FIELD_X] / z) * FOCAL_LENGTH + halfW;
     const sy = (pool[base + FIELD_Y] / z) * FOCAL_LENGTH + halfH;
 
@@ -162,10 +167,15 @@ function sigilUpdate(mouse, dt, cursorMoved) {
         _releaseSigilStars();
         _state = SIGIL_NORMAL;
         _idleMs = 0;
+        _formingMs = 0;
         break;
       }
+      _formingMs += dt;
       const settled = _springStep(dt);
-      if (settled) _state = SIGIL_FORMED;
+      if (settled || _formingMs > 3000) {
+        _state = SIGIL_FORMED;
+        _formingMs = 0;
+      }
       break;
     }
 
@@ -174,12 +184,14 @@ function sigilUpdate(mouse, dt, cursorMoved) {
         _releaseSigilStars();
         _state = SIGIL_NORMAL;
         _idleMs = 0;
+        _formingMs = 0;
         break;
       }
       if (mouse.clicked) {
         _detonate();
         _state = SIGIL_NORMAL;
         _idleMs = 0;
+        _formingMs = 0;
         break;
       }
       // Keep spring tight while formed

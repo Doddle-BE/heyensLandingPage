@@ -48,7 +48,7 @@ const SIGIL_STAR_COUNT   = 250;    // stars assigned to sigil
 const SIGIL_SPRING_K     = 0.003;  // spring stiffness (per ms²)
 const SIGIL_DAMPING      = 0.92;   // velocity damping per frame
 const SIGIL_SETTLE_VEL   = 0.05;   // px/ms threshold to consider a star settled
-const SIGIL_DISSOLVE_MS  = 1000;   // ms for dissolve drift back to normal
+const SIGIL_DISSOLVE_MS  = 1000;   // reserved — dissolve animation (not yet implemented)
 const SIGIL_BBOX_W       = 400;    // attractor bounding box width in CSS px
 const SIGIL_BBOX_H       = 300;    // attractor bounding box height in CSS px
 
@@ -63,8 +63,8 @@ const CLIFFORD_SAMPLES = 500; // pre-computed points
 const SIGIL_NORMAL    = 0;
 const SIGIL_FORMING   = 1;
 const SIGIL_FORMED    = 2;
-const SIGIL_DISSOLVING = 3;
-const SIGIL_DETONATING = 4;
+const SIGIL_DISSOLVING = 3;  // reserved — not yet implemented
+const SIGIL_DETONATING = 4;  // reserved — not yet implemented
 
 // Base layer velocities (pixels/ms in screen space — applied during init)
 const LAYER_BASE_VX = [0.01, 0.025, 0.05];
