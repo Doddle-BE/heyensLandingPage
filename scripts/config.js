@@ -17,8 +17,8 @@ const BASE_REPULSE = 2;
 const MAX_CURSOR_VEL = 40;
 
 // Supernova
-const SUPERNOVA_IMPULSE = 2000;
-const MAX_STAR_VEL = 20;
+const SUPERNOVA_IMPULSE = 400;
+const MAX_STAR_VEL = 4;
 
 // Performance fallback
 const SLOW_FRAME_THRESHOLD_MS = 25; // ~1.5× at 60Hz
@@ -69,3 +69,8 @@ const SIGIL_DETONATING = 4;  // reserved — not yet implemented
 // Base layer velocities (pixels/ms in screen space — applied during init)
 const LAYER_BASE_VX = [0.01, 0.025, 0.05];
 const LAYER_BASE_VY = [0.005, 0.012, 0.025];
+
+// Chromatic depth + cinematic glow
+const GLOW_MAX_Z   = 300;                        // only stars closer than this bloom
+const GLOW_MULTS   = [8, 4, 2];                  // glow ring radii as multiples of star radius
+const GLOW_ALPHAS  = [0.015, 0.030, 0.060];      // per-ring alpha (outer → inner)

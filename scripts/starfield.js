@@ -7,6 +7,10 @@ let canvasW = 0;
 let canvasH = 0;
 let elapsedMs = 0;
 
+// Pre-built color lookup: 256 entries from warm amber (z near) to cool blue (z far).
+// Built once in sfInit — zero string allocation during render.
+const COLOR_TABLE = new Array(256);
+
 // Offsets into pool where each layer starts
 let layerStart = [0, 0, 0];
 
@@ -14,6 +18,15 @@ function sfInit(w, h) {
   canvasW = w;
   canvasH = h;
   elapsedMs = 0;
+
+  // Build chromatic color table: warm amber (z=Z_NEAR) → cool blue (z=Z_FAR)
+  for (let i = 0; i < 256; i++) {
+    const t = Math.sqrt(i / 255); // sqrt bias: more warm stars than cool
+    const r = Math.round(255 + (130 - 255) * t);
+    const g = Math.round(220 + (160 - 220) * t);
+    const b = Math.round(160 + (255 - 160) * t);
+    COLOR_TABLE[i] = `rgb(${r},${g},${b})`;
+  }
 
   totalStars = STAR_COUNT[0] + STAR_COUNT[1] + STAR_COUNT[2];
   pool = new Float32Array(totalStars * FIELDS);
@@ -117,13 +130,11 @@ function sfUpdate(mouse, activeCount, dt) {
 
       // Edge recycling — skip sigil-assigned stars (they spring back on their own)
       if ((nsx < 0 || nsx > canvasW || nsy < 0 || nsy > canvasH) && pool[base + FIELD_MODE] === 0) {
-        // Re-enter from depth. World-space range must scale with Z_FAR/FOCAL_LENGTH
-        // so recycled stars project across the full screen — not just the center band.
-        // At Z_FAR a naive ±canvasW range only covers ±(FOCAL_LENGTH/Z_FAR) of screen width.
-        const spawnScale = Z_FAR / FOCAL_LENGTH;
+        // Preserve z — stars re-enter at the same depth they left.
+        // Spawn range scales with z so the star projects anywhere on screen.
+        const spawnScale = z / FOCAL_LENGTH;
         pool[base + FIELD_X] = (Math.random() - 0.5) * canvasW * spawnScale;
         pool[base + FIELD_Y] = (Math.random() - 0.5) * canvasH * spawnScale;
-        pool[base + FIELD_Z] = Z_FAR;
         pool[base + FIELD_VX] = (Math.random() - 0.5) * LAYER_BASE_VX[layer] * 2;
         pool[base + FIELD_VY] = (Math.random() - 0.5) * LAYER_BASE_VY[layer] * 2;
       }
@@ -141,19 +152,15 @@ function sfRender(ctx, activeCount) {
   const halfW = canvasW * 0.5;
   const halfH = canvasH * 0.5;
 
-  // Layer colors — brighter for foreground (layer 0), dimmer for background
-  const layerColors = ['#ffffff', '#aaaacc', '#667788'];
-
+  // ── Normal star pass ────────────────────────────────────────────────────────
+  // Per-star fillStyle from COLOR_TABLE (chromatic depth: warm near, cool far).
+  // globalAlpha is already set per-star for twinkling, so the old per-layer
+  // fillStyle batch was already broken — no additional perf cost here.
   for (let layer = 0; layer < LAYER_COUNT; layer++) {
     const count = activeCount[layer];
     const start = layerStart[layer];
     const baseRadius = BASE_RADIUS[layer];
     const isLayer1 = layer === 0;
-
-    // Batch fillStyle — one state change per layer
-    ctx.fillStyle = layerColors[layer];
-
-    if (isLayer1) ctx.beginPath();
 
     for (let i = 0; i < count; i++) {
       const base = (start + i) * FIELDS;
@@ -165,24 +172,56 @@ function sfRender(ctx, activeCount) {
       const sx = (x / z) * FOCAL_LENGTH + halfW;
       const sy = (y / z) * FOCAL_LENGTH + halfH;
 
-      // Clip check
       if (sx < 0 || sx > canvasW || sy < 0 || sy > canvasH) continue;
 
       const r = Math.max(0.3, Math.min(3, (baseRadius / z) * FOCAL_LENGTH));
 
+      const colorIdx = Math.min(255, Math.max(0, Math.floor((z - Z_NEAR) / (Z_FAR - Z_NEAR) * 255)));
+      ctx.fillStyle = COLOR_TABLE[colorIdx];
       ctx.globalAlpha = pool[base + FIELD_ALPHA];
 
       if (isLayer1) {
-        // Layer 1: arc (visible, larger stars)
         ctx.beginPath();
         ctx.arc(sx, sy, r, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        // Layers 2+3: fillRect — ~3× faster, visually identical at small sizes
         ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
       }
     }
 
     ctx.globalAlpha = 1;
   }
+
+  // ── Additive glow pass (layer 0 only) ──────────────────────────────────────
+  // No gradients — plain solid circles in 'lighter' (additive) compositing mode.
+  // Overlapping halos stack: dense star clusters naturally bloom brighter.
+  ctx.globalCompositeOperation = 'lighter';
+
+  const glowCount = activeCount[0];
+  const glowStart = layerStart[0];
+
+  for (let i = 0; i < glowCount; i++) {
+    const base = (glowStart + i) * FIELDS;
+    const z = pool[base + FIELD_Z];
+    if (z <= 0 || z > GLOW_MAX_Z) continue;
+
+    const sx = (pool[base + FIELD_X] / z) * FOCAL_LENGTH + halfW;
+    const sy = (pool[base + FIELD_Y] / z) * FOCAL_LENGTH + halfH;
+    if (sx < 0 || sx > canvasW || sy < 0 || sy > canvasH) continue;
+
+    const r = Math.max(0.3, Math.min(3, (BASE_RADIUS[0] / z) * FOCAL_LENGTH));
+    const alpha = pool[base + FIELD_ALPHA];
+    const colorIdx = Math.min(255, Math.max(0, Math.floor((z - Z_NEAR) / (Z_FAR - Z_NEAR) * 255)));
+    ctx.fillStyle = COLOR_TABLE[colorIdx];
+
+    for (let g = 0; g < 3; g++) {
+      ctx.globalAlpha = alpha * GLOW_ALPHAS[g];
+      ctx.beginPath();
+      ctx.arc(sx, sy, r * GLOW_MULTS[g], 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
 }
