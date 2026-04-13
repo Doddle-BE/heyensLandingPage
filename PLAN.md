@@ -11,9 +11,9 @@ Repo: heyensLandingPage (local, no remote)
 
 ### 10x Check
 
-The 10x version is the JH sigil personality layer: the starfield develops
+The 10x version is the Clifford attractor sigil personality layer: the starfield develops
 behavioral states. When cursor is idle, nearby stars cluster toward the mouse
-and form a temporary constellation. On click, stars snap into a `JH` initials
+and form a temporary constellation. On click, stars snap into a Clifford attractor
 sigil for half a second, then detonate into the supernova. The page doesn't
 just react — it *initiates*. "Wait, the page noticed me" → visitor screenshots
 it and sends it to someone.
@@ -52,7 +52,7 @@ Status: APPROVED.
 
 ## Deferred to TODOS.md
 
-- Phase 2: JH sigil personality layer (idle detection, constellation clustering, sigil reveal, detonation)
+- Phase 2: Clifford attractor sigil personality layer (idle detection, constellation clustering, sigil reveal, detonation)
 - Touch/mobile cursor mapping (`touchmove` → cursor velocity)
 
 ## Architecture Notes (from CEO review)
@@ -98,7 +98,7 @@ scripts/config.js
   FIELD_X=0, FIELD_Y=1, FIELD_Z=2
   FIELD_VX=3, FIELD_VY=4
   FIELD_ALPHA=5, FIELD_LAYER=6, FIELD_PHASE=7
-  -- Phase 2 JH sigil (reserved, initialized to 0, unused in Phase 1):
+  -- Phase 2 Clifford attractor sigil (reserved, initialized to 0, unused in Phase 1):
   FIELD_TARGET_X=8, FIELD_TARGET_Y=9, FIELD_MODE=10, FIELD_TIMER=11
 
 scripts/starfield.js
@@ -193,7 +193,7 @@ scripts/main.js
 - Touch/mobile cursor interaction
 - GitHub Pages deploy workflow
 - Color palette toggle (light/dark)
-- JH sigil personality layer
+- Clifford attractor sigil personality layer
 - Sound effects on click
 - Content overlays (Phase 2)
 - Any backend, database, analytics
@@ -210,7 +210,7 @@ CURRENT: empty repo
 THIS PLAN: depth-layered interactive starfield, 60fps, cursor-reactive,
            click supernova, prefers-reduced-motion aware, accessible
 12-MONTH: full personal landing page — starfield + content layers +
-           JH sigil personality + responsive design + live URL
+           Clifford attractor sigil personality + responsive design + live URL
 ```
 
 This plan gets from empty repo to the memorable, shareable version.

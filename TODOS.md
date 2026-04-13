@@ -46,9 +46,9 @@ resets. Map single-touch only. Pinch/multi-touch ignored.
 
 ---
 
-### JH sigil personality layer (Phase 2 of the animation)
+### Clifford attractor sigil personality layer (Phase 2 of the animation)
 When cursor is idle, nearby stars cluster toward mouse forming a temporary
-constellation. On click: stars snap into `JH` letter shapes for ~500ms, then
+constellation. On click: stars snap into Clifford attractor shapes for ~500ms, then
 detonate into the supernova.
 
 **Why:** The "wait, the page noticed me" moment. Turns a pretty effect into a
