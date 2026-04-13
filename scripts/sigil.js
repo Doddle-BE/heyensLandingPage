@@ -180,15 +180,15 @@ function sigilUpdate(mouse, dt, cursorMoved) {
     }
 
     case SIGIL_FORMED:
-      if (cursorMoved) {
-        _releaseSigilStars();
+      if (mouse.clicked) {
+        _detonate();
         _state = SIGIL_NORMAL;
         _idleMs = 0;
         _formingMs = 0;
         break;
       }
-      if (mouse.clicked) {
-        _detonate();
+      if (cursorMoved) {
+        _releaseSigilStars();
         _state = SIGIL_NORMAL;
         _idleMs = 0;
         _formingMs = 0;

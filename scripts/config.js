@@ -17,8 +17,8 @@ const BASE_REPULSE = 2;
 const MAX_CURSOR_VEL = 40;
 
 // Supernova
-const SUPERNOVA_IMPULSE = 8;
-const MAX_STAR_VEL = 15;
+const SUPERNOVA_IMPULSE = 2000;
+const MAX_STAR_VEL = 20;
 
 // Performance fallback
 const SLOW_FRAME_THRESHOLD_MS = 25; // ~1.5× at 60Hz
