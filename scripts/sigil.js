@@ -11,11 +11,10 @@ let _points      = null;       // pre-computed attractor points (from attractor.
 let _canvasW     = 0;
 let _canvasH     = 0;
 
-// Called once after sfInit and buildCliffordPoints
+// Called once after sfInit
 function sigilInit(canvasW, canvasH) {
   _canvasW = canvasW;
   _canvasH = canvasH;
-  _points  = buildCliffordPoints(SIGIL_BBOX_W, SIGIL_BBOX_H);
   _state      = SIGIL_NORMAL;
   _idleMs     = 0;
   _formingMs  = 0;
@@ -25,6 +24,7 @@ function sigilInit(canvasW, canvasH) {
 // Assign SIGIL_STAR_COUNT stars to sigil targets.
 // Prefers layer 1 (mid-layer) then layer 0 then layer 2 for visual density.
 function _assignStars() {
+  _points = buildCliffordPoints(SIGIL_BBOX_W, SIGIL_BBOX_H); // pick a new random shape each time
   // Build weighted candidate list: all star flat indices, layer 1 first
   const preferred = [1, 0, 2];
   const candidates = [];

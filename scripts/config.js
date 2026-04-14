@@ -36,13 +36,13 @@ const FIELD_ALPHA = 5;
 const FIELD_LAYER = 6;
 const FIELD_PHASE = 7;
 
-// Phase 2 — Clifford attractor sigil fields
+// Idle formation fields
 const FIELD_TARGET_X = 8;
 const FIELD_TARGET_Y = 9;
 const FIELD_MODE     = 10;
 const FIELD_TIMER    = 11;
 
-// Sigil — Clifford attractor parameters
+// Idle formation tuning
 const SIGIL_IDLE_MS      = 4000;   // ms of no cursor movement before sigil forms
 const SIGIL_STAR_COUNT   = 250;    // stars assigned to sigil
 const SIGIL_SPRING_K     = 0.003;  // spring stiffness (per ms²)
@@ -52,12 +52,8 @@ const SIGIL_DISSOLVE_MS  = 1000;   // reserved — dissolve animation (not yet i
 const SIGIL_BBOX_W       = 400;    // attractor bounding box width in CSS px
 const SIGIL_BBOX_H       = 300;    // attractor bounding box height in CSS px
 
-// Clifford attractor parameters — produces a dense asymmetric shape
-const CLIFFORD_A = -1.4;
-const CLIFFORD_B =  1.6;
-const CLIFFORD_C =  1.0;
-const CLIFFORD_D =  0.7;
-const CLIFFORD_SAMPLES = 500; // pre-computed points
+// Idle formation parameters
+const CLIFFORD_SAMPLES = 500; // pre-computed points per formation
 
 // Sigil state enum
 const SIGIL_NORMAL    = 0;

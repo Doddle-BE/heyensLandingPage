@@ -24,25 +24,9 @@ pointer-events on the overlay only. Revisit CSS layout for responsive.
 
 ## P2 — Future
 
-### Touch/mobile cursor interaction
-Map `touchmove` events to the cursor velocity system. Touch visitors currently see
-the starfield but get no interactive behavior — the core delight ("it behaves back")
-is absent for them.
-
-**Why:** Mobile is likely a significant portion of visitors. The reciprocity effect
-is the whole point.
-
-**Pros:** ~15 LOC addition to `scripts/input.js`. Same pipeline as mousemove:
-`touch.clientX/Y → vel computation → EMA smoothing → force field`.
-
-**Cons:** Touch velocity semantics differ from mouse (no hover, touch = press).
-May need tuning of INFLUENCE_RADIUS and BASE_REPULSE for touch feel.
-
-**Context:** `touchstart` sets origin, `touchmove` computes delta, `touchend`
-resets. Map single-touch only. Pinch/multi-touch ignored.
-
-**Effort:** S (human: ~30 min / CC: ~5 min)
-**Depends on:** Phase 1 starfield stable
+### ~~Touch/mobile cursor interaction~~ ✓ DONE
+Implemented in `scripts/input.js`: `touchstart` sets origin + triggers supernova,
+`touchmove` runs through the same EMA velocity pipeline as `mousemove`, single-touch only.
 
 ---
 
