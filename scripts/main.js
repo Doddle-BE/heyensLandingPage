@@ -23,12 +23,11 @@
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
-    // Read CSS-computed size (position:fixed; width:100%; height:100%) so JS
-    // and CSS are always in sync — avoids a conflict where the browser updates
-    // the CSS layout (e.g. mobile address bar show/hide) while the JS inline
-    // style holds a stale snapshot, triggering an unnecessary full reinit.
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
+    // Use window.innerWidth/Height — reliable on iOS Safari before first layout.
+    // canvas.clientWidth/Height can return 0 on iOS when position:fixed elements
+    // haven't been laid out yet, producing a 0×0 canvas (black screen).
+    const w = window.innerWidth  || canvas.clientWidth  || document.documentElement.clientWidth;
+    const h = window.innerHeight || canvas.clientHeight || document.documentElement.clientHeight;
     canvas.width  = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     // setTransform replaces matrix — safe to call repeatedly on resize
