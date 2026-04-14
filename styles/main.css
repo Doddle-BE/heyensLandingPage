@@ -21,3 +21,108 @@ canvas {
     display: none;
   }
 }
+
+#reduced-motion-overlay {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #reduced-motion-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .static-stars {
+    position: fixed;
+    inset: 0;
+    /* ~60 static stars scattered via box-shadow on a 1×1 element */
+    width: 1px;
+    height: 1px;
+    background: transparent;
+    box-shadow:
+      12px  84px 0 1px rgba(255,220,160,0.9),
+      67px 210px 0 1px rgba(200,180,255,0.7),
+     143px  33px 0 1px rgba(255,220,160,0.8),
+     198px 312px 0 1px rgba(200,180,255,0.6),
+     251px 155px 0 1px rgba(255,220,160,0.9),
+     309px  77px 0 1px rgba(200,180,255,0.8),
+     372px 268px 0 1px rgba(255,220,160,0.6),
+     418px 401px 0 1px rgba(200,180,255,0.9),
+     489px 134px 0 1px rgba(255,220,160,0.7),
+     534px 487px 0 1px rgba(200,180,255,0.6),
+     601px  52px 0 1px rgba(255,220,160,0.8),
+     659px 344px 0 1px rgba(200,180,255,0.7),
+     712px 218px 0 1px rgba(255,220,160,0.9),
+     778px 503px 0 1px rgba(200,180,255,0.6),
+     823px  97px 0 1px rgba(255,220,160,0.7),
+      38px 432px 0 1px rgba(200,180,255,0.8),
+      89px 567px 0 1px rgba(255,220,160,0.6),
+     171px 623px 0 1px rgba(200,180,255,0.9),
+     224px 711px 0 1px rgba(255,220,160,0.7),
+     284px 548px 0 1px rgba(200,180,255,0.6),
+     347px 689px 0 1px rgba(255,220,160,0.8),
+     402px 754px 0 1px rgba(200,180,255,0.7),
+     463px 612px 0 1px rgba(255,220,160,0.9),
+     521px 733px 0 1px rgba(200,180,255,0.6),
+     578px 668px 0 2px rgba(255,220,160,0.5),
+     635px 789px 0 1px rgba(200,180,255,0.8),
+     694px 601px 0 1px rgba(255,220,160,0.7),
+     749px 712px 0 1px rgba(200,180,255,0.9),
+     805px 543px 0 1px rgba(255,220,160,0.6),
+     856px 678px 0 1px rgba(200,180,255,0.7),
+      55px 312px 0 2px rgba(255,220,160,0.4),
+     118px 178px 0 1px rgba(200,180,255,0.6),
+     234px 445px 0 1px rgba(255,220,160,0.8),
+     312px 189px 0 1px rgba(200,180,255,0.7),
+     445px 356px 0 1px rgba(255,220,160,0.6),
+     502px 223px 0 1px rgba(200,180,255,0.9),
+     567px 412px 0 2px rgba(255,220,160,0.4),
+     623px 145px 0 1px rgba(200,180,255,0.7),
+     689px 389px 0 1px rgba(255,220,160,0.8),
+     745px 267px 0 1px rgba(200,180,255,0.6),
+     812px 423px 0 1px rgba(255,220,160,0.7),
+     134px 734px 0 1px rgba(200,180,255,0.8),
+     289px 812px 0 1px rgba(255,220,160,0.6),
+     456px 867px 0 1px rgba(200,180,255,0.7),
+     612px 823px 0 2px rgba(255,220,160,0.4),
+     767px 756px 0 1px rgba(200,180,255,0.9),
+     889px 312px 0 1px rgba(255,220,160,0.6),
+     934px 156px 0 1px rgba(200,180,255,0.7),
+     956px 489px 0 1px rgba(255,220,160,0.8),
+     978px 623px 0 1px rgba(200,180,255,0.6),
+      23px 712px 0 1px rgba(255,220,160,0.7),
+     167px 867px 0 1px rgba(200,180,255,0.8),
+     345px 934px 0 1px rgba(255,220,160,0.5),
+     523px 956px 0 1px rgba(200,180,255,0.6),
+     701px 889px 0 1px rgba(255,220,160,0.7),
+     879px 834px 0 1px rgba(200,180,255,0.8),
+     912px 712px 0 2px rgba(255,220,160,0.4),
+     945px  67px 0 1px rgba(200,180,255,0.7),
+     989px 834px 0 1px rgba(255,220,160,0.6),
+      78px 945px 0 1px rgba(200,180,255,0.5);
+  }
+
+  #reduced-motion-overlay p {
+    position: relative;
+    margin: 0;
+    text-align: center;
+    color: rgba(255, 220, 160, 0.5);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    line-height: 1.7;
+  }
+
+  #reduced-motion-overlay p span {
+    display: block;
+    color: rgba(255, 255, 255, 0.2);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+}

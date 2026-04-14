@@ -23,11 +23,8 @@
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
-    // Use window.innerWidth/Height — reliable on iOS Safari before first layout.
-    // canvas.clientWidth/Height can return 0 on iOS when position:fixed elements
-    // haven't been laid out yet, producing a 0×0 canvas (black screen).
-    const w = window.innerWidth  || canvas.clientWidth  || document.documentElement.clientWidth;
-    const h = window.innerHeight || canvas.clientHeight || document.documentElement.clientHeight;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
     canvas.width  = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     // setTransform replaces matrix — safe to call repeatedly on resize
