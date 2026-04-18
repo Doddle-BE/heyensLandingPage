@@ -1,227 +1,266 @@
-// Starfield — Float32Array pool, init, update, render
-// All coordinates in CSS pixel space. DPR transform is applied once in main.js.
+// Starfield — 2D graph-trace field.
+// Stars drift slowly; the cursor reveals a graph by drawing links between
+// nearby stars inside a reach radius; clicks emit expanding pulse rings.
+// See starfield/project/Starfield.html for the source design.
 
-let pool = null;       // Float32Array, TOTAL_STARS * FIELDS entries
-let totalStars = 0;
+const TAU = Math.PI * 2;
+
+let stars = [];
 let canvasW = 0;
 let canvasH = 0;
-let elapsedMs = 0;
 
-// Pre-built color lookup: 256 entries from warm amber (z near) to cool blue (z far).
-// Built once in sfInit — zero string allocation during render.
-const COLOR_TABLE = new Array(256);
+// Spatial grid — rebuilt each frame while the cursor is active
+let grid = null;
+let gridW = 0;
+let gridH = 0;
+let gridCell = 0;
 
-// Offsets into pool where each layer starts
-let layerStart = [0, 0, 0];
-
-function sfInit(w, h) {
+function sfInit(w, h, density) {
   canvasW = w;
   canvasH = h;
-  elapsedMs = 0;
-
-  // Build chromatic color table: warm amber (z=Z_NEAR) → cool blue (z=Z_FAR)
-  for (let i = 0; i < 256; i++) {
-    const t = Math.sqrt(i / 255); // sqrt bias: more warm stars than cool
-    const r = Math.round(255 + (130 - 255) * t);
-    const g = Math.round(220 + (160 - 220) * t);
-    const b = Math.round(160 + (255 - 160) * t);
-    COLOR_TABLE[i] = `rgb(${r},${g},${b})`;
+  const n = Math.round(density);
+  stars = new Array(n);
+  for (let i = 0; i < n; i++) {
+    stars[i] = {
+      x: Math.random() * w,
+      y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.02,
+      vy: (Math.random() - 0.5) * 0.02,
+      r: Math.random() < BIG_STAR_PROB
+        ? 1.5 + Math.random() * 0.9
+        : 0.5 + Math.random() * 0.7,
+      ph: Math.random() * TAU,
+      anchor: Math.random() < ANCHOR_PROB,
+    };
   }
+}
 
-  totalStars = STAR_COUNT[0] + STAR_COUNT[1] + STAR_COUNT[2];
-  pool = new Float32Array(totalStars * FIELDS);
+function sfResize(w, h) {
+  // Stars keep their relative positions; just update the bounds.
+  canvasW = w;
+  canvasH = h;
+}
 
-  // Precompute layer start indices
-  layerStart[0] = 0;
-  layerStart[1] = STAR_COUNT[0];
-  layerStart[2] = STAR_COUNT[0] + STAR_COUNT[1];
+function _rebuildGrid() {
+  gridCell = Math.max(40, LINK_DIST);
+  gridW = Math.max(1, Math.ceil(canvasW / gridCell));
+  gridH = Math.max(1, Math.ceil(canvasH / gridCell));
+  const cells = gridW * gridH;
+  grid = new Array(cells);
+  for (let i = 0; i < cells; i++) grid[i] = [];
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    const gx = Math.max(0, Math.min(gridW - 1, (s.x / gridCell) | 0));
+    const gy = Math.max(0, Math.min(gridH - 1, (s.y / gridCell) | 0));
+    grid[gy * gridW + gx].push(i);
+  }
+}
 
-  for (let layer = 0; layer < LAYER_COUNT; layer++) {
-    const count = STAR_COUNT[layer];
-    const start = layerStart[layer];
-    for (let i = 0; i < count; i++) {
-      const base = (start + i) * FIELDS;
-      pool[base + FIELD_X]     = (Math.random() - 0.5) * canvasW * 2;
-      pool[base + FIELD_Y]     = (Math.random() - 0.5) * canvasH * 2;
-      pool[base + FIELD_Z]     = Z_NEAR + Math.random() * (Z_FAR - Z_NEAR);
-      pool[base + FIELD_VX]    = (Math.random() - 0.5) * LAYER_BASE_VX[layer] * 2;
-      pool[base + FIELD_VY]    = (Math.random() - 0.5) * LAYER_BASE_VY[layer] * 2;
-      pool[base + FIELD_ALPHA] = 0.7 + Math.random() * 0.3;
-      pool[base + FIELD_LAYER] = layer;
-      pool[base + FIELD_PHASE] = Math.random() * Math.PI * 2;
-      // Phase 2 reserved fields — initialize to 0
-      pool[base + FIELD_TARGET_X] = 0;
-      pool[base + FIELD_TARGET_Y] = 0;
-      pool[base + FIELD_MODE]     = 0;
-      pool[base + FIELD_TIMER]    = 0;
+function sfUpdate(mouse, pulses, dt) {
+  // Drift + optional cursor nudge + wrap.
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    s.x += s.vx * dt * DRIFT * 3;
+    s.y += s.vy * dt * DRIFT * 3;
+
+    // Short-range push when the cursor is moving — displaces position, not velocity
+    if (mouse.active && mouse.vel > 3) {
+      const dx = s.x - mouse.x;
+      const dy = s.y - mouse.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < PUSH_RADIUS * PUSH_RADIUS && d2 > 1) {
+        const d = Math.sqrt(d2);
+        const push = (1 - d / PUSH_RADIUS) * (mouse.vel / CURSOR_VEL_MAX) * 0.3;
+        s.x += (dx / d) * push;
+        s.y += (dy / d) * push;
+      }
     }
+
+    // Wrap around edges
+    if (s.x < -2) s.x = canvasW + 2; else if (s.x > canvasW + 2) s.x = -2;
+    if (s.y < -2) s.y = canvasH + 2; else if (s.y > canvasH + 2) s.y = -2;
+  }
+
+  // Age pulses and drop expired ones
+  for (let i = pulses.length - 1; i >= 0; i--) {
+    pulses[i].age += dt;
+    if (pulses[i].age > pulses[i].life) pulses.splice(i, 1);
   }
 }
 
-// Project a 3D point to 2D screen space (CSS pixels)
-function project(x, y, z) {
-  const halfW = canvasW * 0.5;
-  const halfH = canvasH * 0.5;
-  return {
-    sx: (x / z) * FOCAL_LENGTH + halfW,
-    sy: (y / z) * FOCAL_LENGTH + halfH,
-  };
+function sfRender(ctx, t, mouse, pulses) {
+  // Opaque clear — canvas was requested with alpha:false
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  // Grid is only consulted when the cursor is active
+  if (USE_GRID && mouse.active) _rebuildGrid();
+
+  // ── Cursor graph trace ───────────────────────────────────────────────────
+  if (mouse.active && mouse.x !== null) {
+    _drawCursorLinks(ctx, mouse);
+    _drawCursorRing(ctx, mouse);
+  }
+
+  // ── Click pulses (rings + secondary link flashes) ────────────────────────
+  for (let i = 0; i < pulses.length; i++) {
+    _drawPulse(ctx, pulses[i]);
+  }
+
+  // ── Anchor glow (additive) ───────────────────────────────────────────────
+  if (NODE_GLOW > 0.01) _drawAnchorGlow(ctx, t);
+
+  // ── Main star pass ───────────────────────────────────────────────────────
+  _drawStars(ctx, t);
+
+  ctx.globalAlpha = 1;
 }
 
-function sfUpdate(mouse, activeCount, dt) {
-  elapsedMs += dt;
+function _drawCursorLinks(ctx, mouse) {
+  const reachSq = CURSOR_REACH * CURSOR_REACH;
+  const linkSq = LINK_DIST * LINK_DIST;
 
-  const halfW = canvasW * 0.5;
-  const halfH = canvasH * 0.5;
-  const mx = mouse.x;
-  const my = mouse.y;
-  const mouseVelNorm = Math.min(mouse.vel / MAX_CURSOR_VEL, 1);
-  const repulseStrength = mouseVelNorm * BASE_REPULSE;
-
-  for (let layer = 0; layer < LAYER_COUNT; layer++) {
-    const count = activeCount[layer];
-    const start = layerStart[layer];
-
-    for (let i = 0; i < count; i++) {
-      const base = (start + i) * FIELDS;
-      const x = pool[base + FIELD_X];
-      const y = pool[base + FIELD_Y];
-      const z = pool[base + FIELD_Z];
-
-      if (z <= 0) continue;
-
-      // Project to screen space (reused for force field + edge recycle)
-      const sx = (x / z) * FOCAL_LENGTH + halfW;
-      const sy = (y / z) * FOCAL_LENGTH + halfH;
-
-      // Cursor force field repulsion
-      if (repulseStrength > 0) {
-        const dx = sx - mx;
-        const dy = sy - my;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < INFLUENCE_RADIUS && dist > 0) {
-          const scale = repulseStrength / dist;
-          pool[base + FIELD_VX] += dx * scale;
-          pool[base + FIELD_VY] += dy * scale;
+  // Gather candidate star indices within cursor reach
+  const candidates = [];
+  if (USE_GRID) {
+    const gx = Math.max(0, Math.min(gridW - 1, (mouse.x / gridCell) | 0));
+    const gy = Math.max(0, Math.min(gridH - 1, (mouse.y / gridCell) | 0));
+    const span = Math.ceil(CURSOR_REACH / gridCell);
+    const yMin = Math.max(0, gy - span);
+    const yMax = Math.min(gridH - 1, gy + span);
+    const xMin = Math.max(0, gx - span);
+    const xMax = Math.min(gridW - 1, gx + span);
+    for (let yy = yMin; yy <= yMax; yy++) {
+      for (let xx = xMin; xx <= xMax; xx++) {
+        const cell = grid[yy * gridW + xx];
+        for (let k = 0; k < cell.length; k++) {
+          const idx = cell[k];
+          const s = stars[idx];
+          const dx = s.x - mouse.x, dy = s.y - mouse.y;
+          if (dx * dx + dy * dy < reachSq) candidates.push(idx);
         }
       }
+    }
+  } else {
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      const dx = s.x - mouse.x, dy = s.y - mouse.y;
+      if (dx * dx + dy * dy < reachSq) candidates.push(i);
+    }
+  }
 
-      // Supernova impulse
-      if (mouse.clicked) {
-        const dx = sx - mouse.clickX;
-        const dy = sy - mouse.clickY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const safeDist = Math.max(dist, 1);
-        const mag = SUPERNOVA_IMPULSE / safeDist;
-        pool[base + FIELD_VX] += (dx / safeDist) * mag;
-        pool[base + FIELD_VY] += (dy / safeDist) * mag;
-        // Velocity cap
-        pool[base + FIELD_VX] = Math.max(-MAX_STAR_VEL, Math.min(MAX_STAR_VEL, pool[base + FIELD_VX]));
-        pool[base + FIELD_VY] = Math.max(-MAX_STAR_VEL, Math.min(MAX_STAR_VEL, pool[base + FIELD_VY]));
+  // Draw links — opacity is the product of (pair distance falloff) × (cursor distance falloff)
+  ctx.lineWidth = 0.6;
+  ctx.strokeStyle = 'rgba(232, 218, 186, 1)';
+
+  for (let a = 0; a < candidates.length; a++) {
+    const sa = stars[candidates[a]];
+    const dax = sa.x - mouse.x, day = sa.y - mouse.y;
+    const dCursorA = Math.sqrt(dax * dax + day * day);
+    const cursorFadeA = 1 - dCursorA / CURSOR_REACH;
+    for (let b = a + 1; b < candidates.length; b++) {
+      const sb = stars[candidates[b]];
+      const dx = sa.x - sb.x, dy = sa.y - sb.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < linkSq) {
+        const d = Math.sqrt(d2);
+        const linkFade = 1 - d / LINK_DIST;
+        const dbx = sb.x - mouse.x, dby = sb.y - mouse.y;
+        const dCursorB = Math.sqrt(dbx * dbx + dby * dby);
+        const cursorFadeB = 1 - dCursorB / CURSOR_REACH;
+        const cursorFade = (cursorFadeA + cursorFadeB) * 0.5;
+        const alpha = Math.pow(linkFade, 1.1) * Math.pow(cursorFade, 1.4) * 0.55;
+        if (alpha > 0.02) {
+          ctx.globalAlpha = alpha;
+          ctx.beginPath();
+          ctx.moveTo(sa.x, sa.y);
+          ctx.lineTo(sb.x, sb.y);
+          ctx.stroke();
+        }
       }
-
-      // Integrate position (vx/vy are in CSS pixels per ms)
-      pool[base + FIELD_X] += pool[base + FIELD_VX] * dt;
-      pool[base + FIELD_Y] += pool[base + FIELD_VY] * dt;
-
-      // Recompute screen pos after position update for edge check
-      const nsx = (pool[base + FIELD_X] / z) * FOCAL_LENGTH + halfW;
-      const nsy = (pool[base + FIELD_Y] / z) * FOCAL_LENGTH + halfH;
-
-      // Edge recycling — skip sigil-assigned stars (they spring back on their own)
-      if ((nsx < 0 || nsx > canvasW || nsy < 0 || nsy > canvasH) && pool[base + FIELD_MODE] === 0) {
-        // Preserve z — stars re-enter at the same depth they left.
-        // Spawn range scales with z so the star projects anywhere on screen.
-        const spawnScale = z / FOCAL_LENGTH;
-        pool[base + FIELD_X] = (Math.random() - 0.5) * canvasW * spawnScale;
-        pool[base + FIELD_Y] = (Math.random() - 0.5) * canvasH * spawnScale;
-        pool[base + FIELD_VX] = (Math.random() - 0.5) * LAYER_BASE_VX[layer] * 2;
-        pool[base + FIELD_VY] = (Math.random() - 0.5) * LAYER_BASE_VY[layer] * 2;
-      }
-
-      // Twinkle alpha
-      const phase = pool[base + FIELD_PHASE];
-      pool[base + FIELD_ALPHA] = 0.7 + 0.3 * Math.sin(elapsedMs * 0.002 + phase);
     }
   }
 }
 
-function sfRender(ctx, activeCount) {
-  ctx.clearRect(0, 0, canvasW, canvasH);
+function _drawCursorRing(ctx, mouse) {
+  const pulseR = 6 + mouse.vel * 0.6;
+  ctx.globalAlpha = 0.15 + Math.min(0.35, mouse.vel * 0.015);
+  ctx.strokeStyle = 'rgba(255, 220, 170, 1)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.arc(mouse.x, mouse.y, pulseR, 0, TAU);
+  ctx.stroke();
+}
 
-  const halfW = canvasW * 0.5;
-  const halfH = canvasH * 0.5;
+function _drawPulse(ctx, p) {
+  const k = p.age / p.life;
+  const r = k * PULSE_MAX_R;
+  const a = (1 - k) * 0.45;
 
-  // ── Normal star pass ────────────────────────────────────────────────────────
-  // Per-star fillStyle from COLOR_TABLE (chromatic depth: warm near, cool far).
-  // globalAlpha is already set per-star for twinkling, so the old per-layer
-  // fillStyle batch was already broken — no additional perf cost here.
-  for (let layer = 0; layer < LAYER_COUNT; layer++) {
-    const count = activeCount[layer];
-    const start = layerStart[layer];
-    const baseRadius = BASE_RADIUS[layer];
-    const isLayer1 = layer === 0;
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = 'rgba(255, 220, 170, 1)';
+  ctx.lineWidth = 1.2 * (1 - k) + 0.4;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, TAU);
+  ctx.stroke();
 
-    for (let i = 0; i < count; i++) {
-      const base = (start + i) * FIELDS;
-      const z = pool[base + FIELD_Z];
-      if (z <= 0) continue;
-
-      const x = pool[base + FIELD_X];
-      const y = pool[base + FIELD_Y];
-      const sx = (x / z) * FOCAL_LENGTH + halfW;
-      const sy = (y / z) * FOCAL_LENGTH + halfH;
-
-      if (sx < 0 || sx > canvasW || sy < 0 || sy > canvasH) continue;
-
-      const r = Math.max(0.3, Math.min(3, (baseRadius / z) * FOCAL_LENGTH));
-
-      const colorIdx = Math.min(255, Math.max(0, Math.floor((z - Z_NEAR) / (Z_FAR - Z_NEAR) * 255)));
-      ctx.fillStyle = COLOR_TABLE[colorIdx];
-      ctx.globalAlpha = pool[base + FIELD_ALPHA];
-
-      if (isLayer1) {
-        ctx.beginPath();
-        ctx.arc(sx, sy, r, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+  // Secondary: flash links between stars near the ring
+  const linkSq = LINK_DIST * LINK_DIST * 0.8;
+  ctx.strokeStyle = 'rgba(255, 230, 180, 1)';
+  ctx.lineWidth = 0.8;
+  for (let j = 0; j < stars.length; j++) {
+    const s = stars[j];
+    const dx = s.x - p.x, dy = s.y - p.y;
+    const dd = Math.sqrt(dx * dx + dy * dy);
+    if (Math.abs(dd - r) < PULSE_RING_WIDTH) {
+      const limit = Math.min(stars.length, j + 40);
+      for (let kk = j + 1; kk < limit; kk++) {
+        const s2 = stars[kk];
+        const dxx = s.x - s2.x, dyy = s.y - s2.y;
+        const d2 = dxx * dxx + dyy * dyy;
+        if (d2 < linkSq) {
+          const nearness = 1 - Math.abs(dd - r) / PULSE_RING_WIDTH;
+          ctx.globalAlpha = nearness * (1 - k) * 0.6;
+          ctx.beginPath();
+          ctx.moveTo(s.x, s.y);
+          ctx.lineTo(s2.x, s2.y);
+          ctx.stroke();
+          break;
+        }
       }
     }
-
-    ctx.globalAlpha = 1;
   }
+}
 
-  // ── Additive glow pass (layer 0 only) ──────────────────────────────────────
-  // No gradients — plain solid circles in 'lighter' (additive) compositing mode.
-  // Overlapping halos stack: dense star clusters naturally bloom brighter.
+function _drawAnchorGlow(ctx, t) {
   ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = 'rgb(255, 225, 180)';
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    if (!s.anchor) continue;
+    const tw2 = 0.5 + 0.5 * Math.sin(t * 0.0014 + s.ph);
+    const a = (0.6 + tw2 * 0.4) * NODE_GLOW;
+    ctx.globalAlpha = a * 0.10;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 10, 0, TAU); ctx.fill();
+    ctx.globalAlpha = a * 0.22;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 4, 0, TAU); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
 
-  const glowCount = activeCount[0];
-  const glowStart = layerStart[0];
-
-  for (let i = 0; i < glowCount; i++) {
-    const base = (glowStart + i) * FIELDS;
-    const z = pool[base + FIELD_Z];
-    if (z <= 0 || z > GLOW_MAX_Z) continue;
-
-    const sx = (pool[base + FIELD_X] / z) * FOCAL_LENGTH + halfW;
-    const sy = (pool[base + FIELD_Y] / z) * FOCAL_LENGTH + halfH;
-    if (sx < 0 || sx > canvasW || sy < 0 || sy > canvasH) continue;
-
-    const r = Math.max(0.3, Math.min(3, (BASE_RADIUS[0] / z) * FOCAL_LENGTH));
-    const alpha = pool[base + FIELD_ALPHA];
-    const colorIdx = Math.min(255, Math.max(0, Math.floor((z - Z_NEAR) / (Z_FAR - Z_NEAR) * 255)));
-    ctx.fillStyle = COLOR_TABLE[colorIdx];
-
-    for (let g = 0; g < 3; g++) {
-      ctx.globalAlpha = alpha * GLOW_ALPHAS[g];
+function _drawStars(ctx, t) {
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    const phase = Math.sin(t * 0.0014 + s.ph);
+    const alpha = (1 - TWINKLE) * 0.85 + TWINKLE * (0.45 + 0.55 * (phase * 0.5 + 0.5));
+    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.fillStyle = s.anchor ? 'rgb(255, 232, 195)' : 'rgb(226, 218, 200)';
+    if (s.r < 0.9) {
+      ctx.fillRect(s.x - s.r * 0.5, s.y - s.r * 0.5, s.r, s.r);
+    } else {
       ctx.beginPath();
-      ctx.arc(sx, sy, r * GLOW_MULTS[g], 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, s.r, 0, TAU);
       ctx.fill();
     }
   }
-
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
 }

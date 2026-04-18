@@ -1,77 +1,73 @@
-// Input — mouse tracking with frame-rate-independent velocity EMA
+// Input — mouse/touch position + per-event velocity + click pulses.
 // All coordinates in CSS pixel space.
 
-const TAU_MS = 80; // EMA time constant in ms
+const mouse = {
+  x: null,
+  y: null,
+  vel: 0,
+  active: false,
+};
 
-let _x = 0;
-let _y = 0;
-let _prevX = 0;
-let _prevY = 0;
-let _smoothedVel = 0;
-let _clicked = false;
-let _clickX = 0;
-let _clickY = 0;
-let _lastMoveTime = 0;
+const pulses = [];
 
-function _applyMove(clientX, clientY) {
-  const now = performance.now();
-  const dt = now - _lastMoveTime;
-  _lastMoveTime = now;
+function inputBind(onFirstMove) {
+  let firstMoveFired = false;
+  const fireFirstMove = () => {
+    if (firstMoveFired) return;
+    firstMoveFired = true;
+    if (onFirstMove) onFirstMove();
+  };
 
-  _prevX = _x;
-  _prevY = _y;
-  _x = clientX;
-  _y = clientY;
-
-  if (dt > 0 && dt < 200) {
-    const dx = _x - _prevX;
-    const dy = _y - _prevY;
-    const currentVel = Math.sqrt(dx * dx + dy * dy) / dt; // pixels/ms
-    const alpha = 1 - Math.exp(-dt / TAU_MS);
-    _smoothedVel = _smoothedVel * (1 - alpha) + currentVel * alpha;
-  }
-}
-
-function inputBind() {
-  document.addEventListener('mousemove', (e) => {
-    _applyMove(e.clientX, e.clientY);
+  window.addEventListener('mousemove', (e) => {
+    if (mouse.x !== null) {
+      const dx = e.clientX - mouse.x;
+      const dy = e.clientY - mouse.y;
+      mouse.vel = Math.min(Math.hypot(dx, dy), CURSOR_VEL_MAX);
+    }
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    mouse.active = true;
+    fireFirstMove();
   });
 
-  document.addEventListener('click', (e) => {
-    _clicked = true;
-    _clickX = e.clientX;
-    _clickY = e.clientY;
+  window.addEventListener('mouseleave', () => {
+    mouse.active = false;
   });
 
-  // Touch support — single touch only
-  document.addEventListener('touchstart', (e) => {
+  window.addEventListener('touchmove', (e) => {
     const t = e.touches[0];
-    _lastMoveTime = performance.now();
-    _x = t.clientX;
-    _y = t.clientY;
-    _prevX = _x;
-    _prevY = _y;
-    _clicked = true;
-    _clickX = _x;
-    _clickY = _y;
+    if (!t) return;
+    if (mouse.x !== null) {
+      const dx = t.clientX - mouse.x;
+      const dy = t.clientY - mouse.y;
+      mouse.vel = Math.min(Math.hypot(dx, dy), CURSOR_VEL_MAX);
+    }
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+    mouse.active = true;
+    fireFirstMove();
   }, { passive: true });
 
-  document.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    _applyMove(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: false });
+  window.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    if (!t) return;
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+    mouse.active = true;
+    fireFirstMove();
+  }, { passive: true });
+
+  window.addEventListener('touchend', () => {
+    mouse.active = false;
+  });
+
+  // Click → pulse ring. Capped to a small ring buffer so long sessions don't grow unbounded.
+  window.addEventListener('click', (e) => {
+    pulses.push({ x: e.clientX, y: e.clientY, age: 0, life: PULSE_LIFE_MS });
+    if (pulses.length > PULSE_MAX_COUNT) pulses.shift();
+  });
 }
 
-// Destructive read — resets clicked=false after returning state
-function getMouseState() {
-  const state = {
-    x: _x,
-    y: _y,
-    vel: _smoothedVel,
-    clicked: _clicked,
-    clickX: _clickX,
-    clickY: _clickY,
-  };
-  _clicked = false; // consume the click — prevents per-frame re-application
-  return state;
+function mouseDecay() {
+  mouse.vel *= MOUSE_VEL_DECAY;
 }

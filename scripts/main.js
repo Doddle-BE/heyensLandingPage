@@ -1,42 +1,46 @@
-// Main — RAF loop, DPR setup, perf fallback, resize, visibilitychange
-// COORDINATE CONTRACT: all game logic in CSS pixel space. DPR applied once via setTransform.
+// Main — RAF loop, DPR setup, perf fallback, resize, visibilitychange.
+// COORDINATE CONTRACT: all render/logic in CSS pixel space. DPR applied once via setTransform.
 
 (function () {
   // Two-layer prefers-reduced-motion guard:
-  //   CSS hides the canvas visually; JS returns early to prevent CPU burn.
+  //   CSS hides the canvas + shows the static overlay; JS returns early to avoid CPU burn.
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
   const canvas = document.getElementById('starfield');
-  const ctx = canvas.getContext('2d');
+  // alpha:false lets the browser skip compositing the backdrop — measurable perf win.
+  const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) {
     document.body.style.background = '#0a0a0f';
     return;
+  }
+
+  const hintEl = document.getElementById('hint');
+  let hintFadeTimer = null;
+  function scheduleHintFade() {
+    if (!hintEl || hintFadeTimer) return;
+    hintFadeTimer = setTimeout(() => hintEl.classList.add('fade'), 1400);
   }
 
   let prevTimestamp = null;
   let slowFrameCount = 0;
   let cleanFrameCount = 0;
   let isReduced = false;
-  let activeCount = [...STAR_COUNT]; // mutable loop cap — no pool reinit on fallback
-  let _prevMouseX = 0;
-  let _prevMouseY = 0;
+  let currentDensity = DENSITY;
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
+    const w = canvas.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || window.innerHeight;
     canvas.width  = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
-    // setTransform replaces matrix — safe to call repeatedly on resize
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { w, h };
   }
 
   function init() {
     const { w, h } = setupCanvas();
-    sfInit(w, h);
-    sigilInit(w, h);
-    inputBind();
+    sfInit(w, h, currentDensity);
+    inputBind(scheduleHintFade);
   }
 
   function loop(t) {
@@ -47,10 +51,9 @@
       return;
     }
 
-    const dt = Math.min(t - prevTimestamp, 33); // cap at 33ms (2 frames)
+    const dt = Math.min(t - prevTimestamp, 33);
     prevTimestamp = t;
 
-    // Perf fallback tracking
     if (dt > SLOW_FRAME_THRESHOLD_MS) {
       slowFrameCount++;
       cleanFrameCount = 0;
@@ -59,52 +62,41 @@
       slowFrameCount = 0;
     }
 
-    // Halve star counts after 3 consecutive slow frames
-    if (slowFrameCount >= 3) {
-      activeCount = activeCount.map(n => Math.floor(n / 2));
-      console.warn('Perf fallback: halved star counts to', activeCount);
+    // Halve density after 3 slow frames, restore after 60 clean frames
+    if (slowFrameCount >= 3 && !isReduced) {
+      currentDensity = FALLBACK_DENSITY;
+      sfInit(canvas.clientWidth, canvas.clientHeight, currentDensity);
+      isReduced = true;
       slowFrameCount = 0;
       cleanFrameCount = 0;
-      isReduced = true;
-    }
-
-    // Restore after 60 consecutive clean frames
-    if (cleanFrameCount >= 60 && isReduced) {
-      activeCount = [...STAR_COUNT];
+    } else if (cleanFrameCount >= 60 && isReduced) {
+      currentDensity = DENSITY;
+      sfInit(canvas.clientWidth, canvas.clientHeight, currentDensity);
       isReduced = false;
       cleanFrameCount = 0;
     }
 
-    const mouse = getMouseState();
-    const cursorMoved = (mouse.x !== _prevMouseX || mouse.y !== _prevMouseY);
-    _prevMouseX = mouse.x;
-    _prevMouseY = mouse.y;
-
-    sigilUpdate(mouse, dt, cursorMoved);
-    sfUpdate(mouse, activeCount, dt);
-    sfRender(ctx, activeCount);
+    mouseDecay();
+    sfUpdate(mouse, pulses, dt);
+    sfRender(ctx, t, mouse, pulses);
 
     requestAnimationFrame(loop);
   }
 
-  // Reset prevTimestamp on tab return to prevent dt spike
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) prevTimestamp = null;
   });
 
-  // Debounced resize — reinit canvas size + DPR + pool
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const { w, h } = setupCanvas();
-      sfInit(w, h);
-      sigilInit(w, h);
-      activeCount = [...STAR_COUNT];
-      isReduced = false;
+      // Reseed so density stays well-distributed across the new bounds.
+      sfInit(w, h, currentDensity);
       slowFrameCount = 0;
       cleanFrameCount = 0;
-    }, 100);
+    }, 120);
   });
 
   init();
