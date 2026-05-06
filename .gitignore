@@ -2,3 +2,6 @@
 .gstack/
 .superpowers/
 starfield/
+
+*/node_modules/
+*/dist/
