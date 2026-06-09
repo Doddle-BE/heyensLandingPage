@@ -30,8 +30,10 @@ function inputBind(onFirstMove) {
     fireFirstMove();
   });
 
-  window.addEventListener('mouseleave', () => {
-    mouse.active = false;
+  // window 'mouseleave' is UA-dependent; mouseout with no relatedTarget is the
+  // reliable "pointer left the page" signal.
+  window.addEventListener('mouseout', (e) => {
+    if (!e.relatedTarget) mouse.active = false;
   });
 
   window.addEventListener('touchmove', (e) => {
@@ -57,8 +59,8 @@ function inputBind(onFirstMove) {
     fireFirstMove();
   }, { passive: true });
 
-  window.addEventListener('touchend', () => {
-    mouse.active = false;
+  window.addEventListener('touchend', (e) => {
+    if (e.touches.length === 0) mouse.active = false;
   });
 
   // Click → pulse ring. Capped to a small ring buffer so long sessions don't grow unbounded.

@@ -7,10 +7,14 @@ html, body {
   padding: 0;
   overflow: hidden;
   height: 100%;
-  background: #0a0a0f;
+  background: #05060c;
   color: #cfc7b4;
   font-family: ui-sans-serif, system-ui, sans-serif;
   cursor: crosshair;
+}
+
+canvas#starfield {
+  background: #05060c;
 }
 
 canvas {
@@ -25,13 +29,14 @@ canvas {
 .hint {
   position: fixed;
   left: 50%;
-  bottom: 22px;
+  bottom: 30px;
   transform: translateX(-50%);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
   letter-spacing: 3px;
   text-transform: uppercase;
-  color: rgba(240, 220, 180, 0.32);
+  color: rgba(240, 220, 180, 0.40);
+  white-space: nowrap;
   pointer-events: none;
   transition: opacity 0.6s ease 0.4s;
   z-index: 1;

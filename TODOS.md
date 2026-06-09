@@ -1,5 +1,15 @@
 # TODOS
 
+## Shipped
+
+### ~~Photoreal WebGL sky (Phase 1.5)~~ ✓ DONE 2026-06-09
+`scripts/starfield-gl.js`: WebGL2 renderer — baked Milky Way (domain-warped fbm,
+dust trunks, gold core, nebulae, star powder), ~40k blackbody-colored stars on a
+rotating celestial disc, scintillation, diffraction-spiked heroes, meteors +
+wish-on-click, satellite, supernova shockwave, constellation chart near cursor,
+vignette+grain. GL-first in `main.js`; old 2D field kept as fallback. Sky is
+session-seeded (stable across resize). Quality ladder: DPR → star count → extras.
+
 ## P1 — High Priority
 
 ### Content overlay layer (Phase 2)
