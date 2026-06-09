@@ -11,6 +11,14 @@ html, body {
   color: #cfc7b4;
   font-family: ui-sans-serif, system-ui, sans-serif;
   cursor: crosshair;
+  touch-action: none;          /* pointermove must stream during swipe-look */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.grabbing {
+  cursor: grabbing;
 }
 
 canvas#starfield {
@@ -35,11 +43,19 @@ canvas {
   font-size: 10px;
   letter-spacing: 3px;
   text-transform: uppercase;
-  color: rgba(240, 220, 180, 0.40);
+  color: rgba(240, 220, 180, 0.55);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
   pointer-events: none;
   transition: opacity 0.6s ease 0.4s;
   z-index: 1;
+}
+
+@media (max-width: 480px) {
+  .hint {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+  }
 }
 
 .hint.fade {

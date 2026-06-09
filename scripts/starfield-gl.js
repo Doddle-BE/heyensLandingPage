@@ -1,51 +1,72 @@
-// Starfield GL — photoreal night-sky renderer (WebGL2).
+// Starfield GL v2 — first-person drift through a photoreal galaxy (WebGL2).
 //
-// The whole sky lives on a rotating "celestial disc" centered on an on-screen
-// pole (like a long-exposure polar shot). Layers, back to front:
-//   1. Baked sky texture (FBO, once per resize): deep-space gradient, domain-
-//      warped Milky Way with dust lanes + core bulge, two faint nebulae,
-//      unresolved star speckle, dither.
-//   2. ~8k stars, one gl.POINTS draw: blackbody colors, power-law magnitudes,
-//      per-star scintillation, gaussian PSF + halo, diffraction spikes on the
-//      brightest few. Brightened by cursor proximity and supernova shells.
-//   3. Constellation overlay near the cursor (thin additive lines).
-//   4. Meteors (trail quads), one slow satellite, supernova rings on click.
-//   5. Vignette (alpha-over) + film grain (additive).
+// The visitor floats forward through space and can grab the sky (drag) to look
+// around a full 360°. Layers, back to front:
+//   1. Equirect sky sphere (baked once, 2048x1024): seamless 3D-noise Milky
+//      Way with dust trunks, gold core, two nebulae. Sampled per-pixel by
+//      view ray.
+//   2. Far celestial shell (~32k gl.POINTS at "infinity"): band-clustered
+//      star powder + bright tier with blackbody colors, scintillation and
+//      diffraction-spiked heroes. Stable — carries the constellation chart.
+//   3. Volumetric tier (~18k points wrapped in a cube around the camera):
+//      these stream past as you drift — the "floating through space" layer.
+//   4. Meteors (3D streaks), a distant drifting beacon, supernova shockwaves
+//      on click (screen-space ring + star ignition), constellation overlay.
+//   5. Vignette + film grain.
 //
-// Coordinates: CSS pixels, y-down. Star positions are stored pole-relative;
-// rotation is applied in the vertex shader from a CPU-computed (cosθ, sinθ)
-// so float precision never degrades. Exposes a single global:
-//   sfglCreate(canvas) -> { frame(tMs, mouse, pulses), resize(), degrade() } | null
+// Camera: yaw unbounded (full 360), pitch clamped; grab-the-sky drag with
+// fling inertia; constant forward drift along a fixed world direction plus a
+// breathing sway; idle auto-pan so the scene is never static.
+// Exposes: sfglCreate(canvas) -> { frame(tMs, mouse, pulses, look), resize(), degrade() } | null
 
 function sfglCreate(canvas) {
   'use strict';
 
   const CFG = {
     DPR_MAX: 2,
-    STAR_DENSITY: 1 / 110,        // stars per CSS px² (real points carry the faint field)
-    STAR_MIN: 3000,
-    STAR_MAX: 46000,              // whole disc; only ~1/4 is on screen at once
-    BAND_FRACTION: 0.36,          // share of stars clustered along the galactic band
-    HERO_COUNT: 26,               // brilliant named-star tier (spikes), disc-wide
-    ROT_RATE: 0.0016,             // rad/s sky rotation (~5.5°/min)
-    POLE: [0.78, 0.16],           // pole position, fraction of viewport
-    BAND_ANGLE: -0.56,            // rad, galactic band tilt (y-down space)
-    PARALLAX_NEAR: 22,            // px shift of nearest stars at screen edge
-    PARALLAX_BG: 5,               // px shift of baked sky
-    ZOOM_SETTLE_S: 4.0,           // opening lens settle 1.05 -> 1.0
-    EXPOSURE_S: 1.9,              // opening fade-in
-    METEOR_MIN_GAP: 6000,         // ms between spontaneous meteors
+    // Tiers
+    SHELL_BRIGHT: 20000,          // far-shell resolvable stars
+    SHELL_DUST: 22000,            // far-shell unresolved powder
+    VOLUME_STARS: 21000,          // wrapped fly-through tier
+    HERO_COUNT: 24,               // brilliant spiked tier (far shell)
+    BAND_FRACTION: 0.62,          // shell stars clustered along the galactic band
+    // Camera / motion
+    FOV_Y: 68 * Math.PI / 180,
+    FOV_SETTLE: 74 * Math.PI / 180, // opening: slightly wide, eases to FOV_Y
+    WRAP: 1600,                   // volumetric cube period (world units)
+    DRIFT_SPEED: 20,              // u/s forward cruise
+    DRIFT_DIR: [0.10, 0.06, -1],  // fixed world drift direction (normalized later)
+    SWAY_AMP: 2.6,                // u, breathing sway
+    D0: 260,                      // volumetric intensity falloff scale (units)
+    VOL_GAIN: 3.0,                // luminosity scale of volumetric tier
+    NEAR_CLAMP: 20,               // min distance used in falloff (anti-blind)
+    DRAG_SENS: 0.0025,            // rad per px (mouse) — near-true grab mapping
+    DRAG_SENS_TOUCH: 0.0065,
+    FLING_DAMP: 2.0,              // 1/s exponential decay of look velocity
+    FLING_MAX: 2.5,               // rad/s cap on release velocity
+    PITCH_MAX: 1.53,              // ~87.7°
+    IDLE_YAW_RATE: 0.022,         // rad/s auto-pan when idle
+    IDLE_AFTER: 5000,             // ms without drag before auto-pan resumes
+    HOVER_LOOK: 0.030,            // rad micro-look toward cursor
+    // Choreography
+    EXPOSURE_S: 1.4,
+    SETTLE_S: 4.5,                // FOV + speed ramp
+    FIRST_METEOR_AT: 2600,
+    METEOR_MIN_GAP: 6000,
     METEOR_RAND_GAP: 12000,
-    FIRST_METEOR_AT: 2600,        // ms — choreographed opening streak
-    SAT_MIN_GAP: 55000,
-    SAT_RAND_GAP: 60000,
-    PULSE_LIFE: 1500,             // ms — GL supernova life (input.js life ignored)
+    BEACON_MIN_GAP: 55000,
+    BEACON_RAND_GAP: 60000,
+    // Interaction
+    PULSE_LIFE: 1500,
     PULSE_MAX_R: 460,
     MAX_PULSES: 6,
-    LINE_REACH: 320,              // constellation overlay radius around cursor
+    LINE_REACH: 320,
     LINE_MAX_DIST: 200,
     LINE_NODES: 14,
-    BAKE_SIZE: 2048,
+    // Bake
+    BAKE_W: 2048,
+    BAKE_H: 1024,
+    R_FAR: 4000,                  // far-shell radius (beyond any volumetric star)
   };
 
   // ---------------------------------------------------------------- GL setup
@@ -61,154 +82,175 @@ layout(location=0) in vec2 aClip;
 out vec2 vUv;
 void main(){ vUv = aClip*0.5+0.5; gl_Position = vec4(aClip,0.,1.); }`;
 
-  const NOISE = `
-float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
-float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.-2.*f);
-  return mix(mix(hash12(i),hash12(i+vec2(1,0)),u.x), mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),u.x), u.y); }
-float fbm(vec2 p){ float a=0.5, s=0.0; for(int i=0;i<5;i++){ s+=a*vnoise(p); p=p*2.03+vec2(13.1,7.7); a*=0.5; } return s; }`;
+  const NOISE3 = `
+float hash13(vec3 p){ p=fract(p*0.1031); p+=dot(p,p.zyx+31.32); return fract((p.x+p.y)*p.z); }
+float vnoise3(vec3 p){
+  vec3 i=floor(p), f=fract(p); vec3 u=f*f*(3.-2.*f);
+  float a=hash13(i),             b=hash13(i+vec3(1,0,0));
+  float c=hash13(i+vec3(0,1,0)), d=hash13(i+vec3(1,1,0));
+  float e=hash13(i+vec3(0,0,1)), g=hash13(i+vec3(1,0,1));
+  float h=hash13(i+vec3(0,1,1)), k=hash13(i+vec3(1,1,1));
+  return mix(mix(mix(a,b,u.x),mix(c,d,u.x),u.y), mix(mix(e,g,u.x),mix(h,k,u.x),u.y), u.z);
+}
+float fbm3(vec3 p){ float a=0.5, s=0.0; for(int i=0;i<5;i++){ s+=a*vnoise3(p); p=p*2.03+vec3(13.1,7.7,3.9); a*=0.5; } return s; }`;
 
-  // Bakes the deep sky into a texture. uv spans the celestial disc:
-  // world = (uv-0.5)*2*Rmax, pole-relative, y-down CSS orientation.
+  // Equirect mapping shared by bake (uv->dir) and bg (dir->uv).
+  const EQUIRECT = `
+const float PI = 3.14159265358979;
+vec3 uvToDir(vec2 uv){
+  float lon = (uv.x*2.0-1.0)*PI;
+  float lat = (uv.y-0.5)*PI;
+  float cl = cos(lat);
+  return vec3(cl*sin(lon), sin(lat), -cl*cos(lon));
+}
+vec2 dirToUv(vec3 d){
+  float u = atan(d.x, -d.z)/(2.0*PI)+0.5;
+  float v = asin(clamp(d.y,-1.0,1.0))/PI+0.5;
+  return vec2(u,v);
+}`;
+
+  // Bakes the galaxy onto the equirect sphere. All features are functions of
+  // the unit direction (3D noise) — no seams, no pole pinch artifacts.
   const FS_BAKE = `#version 300 es
 precision highp float;
 in vec2 vUv; out vec4 o;
-uniform float uRmax;
-uniform vec2 uBandC;     // point on band axis (pole-relative)
-uniform vec2 uBandDir;   // unit axis direction
-uniform float uBandSigma;
-uniform float uCoreAlong;
-uniform vec4 uNebA;      // xy, radius, amp  (H-alpha red)
-uniform vec4 uNebB;      // xy, radius, amp  (teal reflection)
-${NOISE}
-// Round unresolved-star dots: jittered gaussian per cell, sized >= 2 bake
-// texels so bilinear sampling keeps them circular (never square confetti).
-float starDots(vec2 w, float cell, float sigma, float thresh){
-  vec2 g = floor(w/cell);
-  float h = hash12(g);
-  vec2 jit = vec2(hash12(g+11.3), hash12(g+27.7));
-  vec2 cpos = (g + 0.25 + 0.5*jit)*cell;
-  float d = length(w - cpos);
-  return exp(-d*d/(2.0*sigma*sigma)) * pow(h, thresh);
-}
+uniform vec3 uGalN;       // galactic plane normal
+uniform vec3 uCoreDir;    // core bulge direction (on the plane)
+uniform vec3 uNebDirA, uNebDirB;
+${NOISE3}
+${EQUIRECT}
 void main(){
-  vec2 w = (vUv-0.5)*(2.0*uRmax);
-  float rN = length(w)/uRmax;
+  vec3 dir = uvToDir(vUv);
 
-  // Base space: near-black blue, darker toward the rim, mottled at huge scale.
-  vec3 col = mix(vec3(0.018,0.026,0.048), vec3(0.005,0.007,0.014), smoothstep(0.0,1.05,rN));
-  col *= 0.90 + 0.20*fbm(w*0.0016+7.3);
+  // Base space — near-black blue with huge-scale mottling.
+  vec3 col = vec3(0.018,0.025,0.048)*(0.70 + 0.75*fbm3(dir*2.2+7.3));
 
-  // Galactic band geometry.
-  vec2 rel = w - uBandC;
-  float along  = dot(rel, uBandDir);
-  float across = dot(rel, vec2(-uBandDir.y, uBandDir.x));
-  float widthMod = 0.72 + 0.55*fbm(vec2(along*0.0011, 3.7));
-  float sigma = uBandSigma*widthMod;
-  float prof = exp(-0.5*pow(across/sigma, 2.0));
+  // Galactic band geometry: angular distance from the plane.
+  float dAng = asin(clamp(dot(dir, uGalN), -1.0, 1.0));
+  float widthMod = 0.72 + 0.55*fbm3(dir*3.1 + 7.0);
+  float sigma = 0.13*widthMod;
+  float prof = exp(-0.5*pow(dAng/sigma, 2.0));
+  float glow = exp(-0.5*pow(dAng/(sigma*2.7), 2.0));
 
-  // Cloud structure: domain-warped fbm.
-  vec2 q = vec2(fbm(w*0.004), fbm(w*0.004+vec2(5.2,1.3)));
-  float clouds = 0.34 + 1.05*fbm(w*0.006 + 3.0*q);
+  // Cloud structure: domain-warped fbm on the sphere.
+  vec3 q = vec3(fbm3(dir*4.0), fbm3(dir*4.0+vec3(5.2,1.3,2.1)), fbm3(dir*4.0+vec3(1.7,9.2,3.8)));
+  float clouds = 0.34 + 1.05*fbm3(dir*10.0 + 4.2*q);
   float band = prof*clouds;
-  float glow = exp(-0.5*pow(across/(sigma*2.7), 2.0));   // wide luminous halo
 
-  // Core bulge — warm, wider.
-  float coreD = length(rel - uBandDir*uCoreAlong);
-  float core = exp(-0.5*pow(coreD/(uBandSigma*1.45), 2.0));
+  // Core bulge — warm angular gaussian around uCoreDir.
+  float coreA = acos(clamp(dot(dir, uCoreDir), -1.0, 1.0));
+  float core = exp(-0.5*pow(coreA/0.40, 2.0));
 
-  // Dust lanes: ridged noise hugging the axis, absorbs band light.
-  float ridge = 1.0 - abs(2.0*fbm(w*0.0045 + 2.0*q + 11.0) - 1.0);
-  float ridge2 = 1.0 - abs(2.0*fbm(w*0.0021 + q + 5.0) - 1.0);
-  float trunks = smoothstep(0.30, 0.78, fbm(w*0.0012 + 19.0));
+  // Dust: two ridge scales gated into trunks, hugging the plane.
+  float ridge  = 1.0 - abs(2.0*fbm3(dir*14.0 + 2.0*q + 11.0) - 1.0);
+  float ridge2 = 1.0 - abs(2.0*fbm3(dir*6.5  + q + 5.0) - 1.0);
+  float trunks = smoothstep(0.30, 0.78, fbm3(dir*3.4 + 19.0));
   float dust = clamp(pow(ridge, 3.2)*0.55 + pow(ridge2, 2.7)*0.85*trunks, 0.0, 1.0)
-             * smoothstep(sigma*1.7, sigma*0.25, abs(across));
+             * smoothstep(sigma*1.7, sigma*0.25, abs(dAng));
   band *= 1.0 - 0.80*dust;
   core *= 1.0 - 0.45*dust;
 
   vec3 bandCool = vec3(0.42,0.54,0.78);
-  vec3 bandWarm = vec3(1.0,0.80,0.50);
+  vec3 bandWarm = vec3(1.0,0.84,0.56);
   col += glow*0.080*mix(bandCool, bandWarm, clamp(core*0.6,0.,1.));
   col += band*0.30*mix(bandCool, bandWarm, clamp(core*1.1,0.,1.));
-  col += core*0.32*vec3(1.0,0.82,0.52);
-  col *= 1.0 - 0.28*dust*prof;            // absorption also dims base sky
+  col += core*prof*0.34*vec3(1.0,0.86,0.60);
+  col *= 1.0 - 0.28*dust*prof;
 
-  // Faint nebulae, fbm-modulated.
-  col += uNebA.w*vec3(0.55,0.10,0.12)*exp(-0.5*pow(length(w-uNebA.xy)/uNebA.z,2.0))*(0.45+0.9*fbm(w*0.010+4.2));
-  col += uNebB.w*vec3(0.07,0.24,0.26)*exp(-0.5*pow(length(w-uNebB.xy)/uNebB.z,2.0))*(0.45+0.9*fbm(w*0.012+9.1));
+  // Nebulae — committed colors, fbm-modulated.
+  float nebA = exp(-0.5*pow(acos(clamp(dot(dir,uNebDirA),-1.,1.))/0.11, 2.0));
+  float nebB = exp(-0.5*pow(acos(clamp(dot(dir,uNebDirB),-1.,1.))/0.15, 2.0));
+  col += 0.22*nebA*vec3(0.55,0.10,0.12)*(0.45+0.9*fbm3(dir*9.0+4.2));
+  col += 0.16*nebB*vec3(0.07,0.24,0.26)*(0.45+0.9*fbm3(dir*11.0+9.1));
 
-  // Powdered starlight: dense micro-dots that thicken inside the band and
-  // warm up near the core — the granular texture of unresolved millions.
-  float sp = starDots(w, 3.4, 1.05, 26.0)*1.0 + starDots(w, 6.0, 1.5, 13.0)*0.55;
-  col += sp*(0.05 + 1.30*prof)*mix(vec3(0.80,0.85,1.0), vec3(1.0,0.88,0.70), clamp(core*1.2,0.,1.))*0.45;
-
-  // Dither kills gradient banding in the deep blacks.
-  col += (hash12(w+0.5)-0.5)*(1.6/255.0);
+  // Dither against banding in the deep blacks.
+  col += (hash13(dir*451.7)-0.5)*(1.6/255.0);
   o = vec4(max(col, 0.0), 1.0);
 }`;
 
-  // Draws the baked sky: inverse-rotate the sampling coordinate around the pole.
+  // Per-pixel view ray -> world ray -> equirect sample.
   const FS_BG = `#version 300 es
 precision highp float;
 in vec2 vUv; out vec4 o;
 uniform sampler2D uTex;
-uniform vec2 uRes, uPole, uRot, uShift;
-uniform float uRmax, uZoom, uExposure;
+uniform mat3 uCam;
+uniform float uTanHalf, uAspect, uExposure;
+${EQUIRECT}
 void main(){
-  vec2 screen = vec2(vUv.x, 1.0-vUv.y)*uRes;       // y-down CSS px
-  vec2 c = uRes*0.5;
-  screen = c + (screen-c)/uZoom;
-  screen -= uShift;
-  vec2 rel = screen - uPole;
-  rel = vec2(rel.x*uRot.x + rel.y*uRot.y, -rel.x*uRot.y + rel.y*uRot.x);  // R(-θ)
-  vec2 uv = rel/(2.0*uRmax)+0.5;
-  o = vec4(texture(uTex, uv).rgb*uExposure, 1.0);
+  vec2 ndc = vUv*2.0-1.0;
+  vec3 rc = normalize(vec3(ndc.x*uTanHalf*uAspect, ndc.y*uTanHalf, -1.0));
+  vec3 rd = uCam*rc;
+  o = vec4(texture(uTex, dirToUv(rd)).rgb*uExposure, 1.0);
 }`;
 
   const VS_STARS = `#version 300 es
-layout(location=0) in vec2 aPos;        // pole-relative, unrotated
-layout(location=1) in float aDepth;     // 0 far .. 1 near
-layout(location=2) in vec3 aColor;
-layout(location=3) in float aIntensity;
-layout(location=4) in vec3 aTwk;        // omega, phase, amp
-uniform vec2 uRes, uPole, uRot, uPar, uMouse;
-uniform float uDpr, uTime, uZoom, uMouseStr, uRotMix, uMaxPt;
+layout(location=0) in vec3 aPos;        // shell: dir*R_FAR; volume: cube coords
+layout(location=1) in vec3 aColor;
+layout(location=2) in float aIntensity; // shell: apparent; volume: luminosity
+layout(location=3) in vec3 aTwk;        // omega, phase, amp
+uniform mat3 uCam;                       // cam->world (columns)
+uniform vec3 uCamPos;
+uniform vec2 uRes, uMouse;
+uniform float uDpr, uTime, uTanHalf, uAspect, uMouseStr, uMaxPt, uExposure;
+uniform float uShell;                    // 1 = far shell (no wrap, no falloff)
+uniform float uWrap, uD0, uVolGain, uNearClamp;
 uniform vec4 uPulse[6];
 uniform int uPulseCount;
 out vec3 vColor; out float vI; out float vSize; out float vSpike;
 void main(){
-  vec2 rotated = vec2(aPos.x*uRot.x - aPos.y*uRot.y, aPos.x*uRot.y + aPos.y*uRot.x);
-  vec2 p = uPole + mix(aPos, rotated, uRotMix);
-  p += uPar*mix(0.25, 1.0, aDepth);
-  vec2 c = uRes*0.5;
-  p = c + (p-c)*uZoom;
+  vec3 rel;
+  if (uShell > 0.5) {
+    rel = aPos;
+  } else {
+    rel = aPos - uCamPos;
+    rel = mod(rel + 0.5*uWrap, uWrap) - 0.5*uWrap;   // nearest periodic image
+  }
+  // World -> camera: columns of uCam are camera axes, so transpose() inverts.
+  vec3 view = transpose(uCam)*rel;
+  if (view.z > -2.0) {                   // behind the camera
+    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vI = 0.0; vColor = vec3(0.0); vSize = 1.0; vSpike = 0.0;
+    return;
+  }
+  float invZ = -1.0/view.z;
+  vec2 ndc = vec2(view.x/uAspect, view.y)*invZ/uTanHalf;
+  gl_Position = vec4(ndc, 0.0, 1.0);
+  vec2 scr = vec2((ndc.x*0.5+0.5)*uRes.x, (0.5-ndc.y*0.5)*uRes.y);
 
   // Scintillation: two incommensurate sines + slow seeing envelope.
   float env = 0.7 + 0.3*sin(uTime*0.13 + aTwk.y*0.7);
   float tw = 1.0 + aTwk.z*env*(0.6*sin(uTime*aTwk.x + aTwk.y) + 0.4*sin(uTime*aTwk.x*2.33 + aTwk.y*1.91));
-  float I = aIntensity*tw;
 
-  // Cursor lens — nearby stars swell gently.
-  float md = distance(p, uMouse);
+  float I;
+  if (uShell > 0.5) {
+    I = aIntensity*tw;
+  } else {
+    float dist = max(length(rel), uNearClamp);
+    I = aIntensity*uVolGain*tw / (1.0 + pow(dist/uD0, 2.0));
+    I = min(I, 3.2);
+  }
+
+  // Cursor lens.
+  float md = distance(scr, uMouse);
   I *= 1.0 + uMouseStr*0.7*exp(-md*md/(240.0*240.0));
 
-  // Supernova shells brighten stars as the wavefront passes.
+  // Supernova shells ignite stars as the wavefront passes (screen space).
   for(int i=0;i<6;i++){
     if(i>=uPulseCount) break;
     vec4 q = uPulse[i];
-    float d = distance(p, q.xy);
+    float d = distance(scr, q.xy);
     I *= 1.0 + q.w*exp(-pow((d-q.z)/46.0, 2.0));
   }
 
   vI = I;
   vColor = aColor;
-  vSpike = step(0.85, aIntensity);
-  float size = (1.7 + 7.5*sqrt(aIntensity))*uDpr*(1.0 + 0.10*(tw-1.0));
-  if (aIntensity > 0.85) size = max(size, (17.0 + 11.0*aIntensity)*uDpr);
+  vSpike = step(0.85, aIntensity)*step(0.5, uShell);
+  float size = (1.6 + 6.8*sqrt(min(I, 3.2)))*uDpr*(1.0 + 0.10*(tw-1.0));
+  if (uShell > 0.5 && aIntensity > 0.85) size = max(size, (17.0 + 11.0*aIntensity)*uDpr);
   size = min(size, uMaxPt);
   vSize = size;
   gl_PointSize = size;
-  vec2 clip = (p/uRes)*2.0 - 1.0;
-  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
 }`;
 
   const FS_STARS = `#version 300 es
@@ -236,7 +278,7 @@ void main(){
 }`;
 
   const VS_LINES = `#version 300 es
-layout(location=0) in vec2 aPos;       // final screen px
+layout(location=0) in vec2 aPos;       // screen px
 layout(location=1) in float aAlpha;
 uniform vec2 uRes;
 out float vA;
@@ -253,9 +295,9 @@ uniform vec3 uColor; uniform float uExposure;
 void main(){ o = vec4(uColor*vA*uExposure, 1.0); }`;
 
   const VS_STREAK = `#version 300 es
-layout(location=0) in vec2 aPos;       // final screen px
+layout(location=0) in vec2 aPos;       // screen px
 layout(location=1) in vec2 aUv;        // x: 0 head -> 1 tail, y: -1..1 across
-layout(location=2) in vec2 aMeta;      // alpha, colorMix (0 cool / 1 warm)
+layout(location=2) in vec2 aMeta;      // alpha, colorMix
 uniform vec2 uRes;
 out vec2 vUv; out vec2 vMeta;
 void main(){
@@ -281,7 +323,7 @@ void main(){
 }`;
 
   const VS_RING = `#version 300 es
-layout(location=0) in vec2 aUnit;      // [-1,1] quad
+layout(location=0) in vec2 aUnit;
 uniform vec2 uRes, uCenter;
 uniform float uHalf;
 out vec2 vLocal;
@@ -302,7 +344,7 @@ void main(){
   float frontT = smoothstep(uR, uR+uW*1.6, d);
   vec3 col = mix(vec3(0.88,0.93,1.0), vec3(0.50,0.72,1.0), frontT);
   float fade = (1.0-uK)*(1.0-uK);
-  float flash = exp(-d*d/(2.0*pow(26.0+uR*0.16, 2.0)))*pow(1.0-uK, 6.0)*1.3;
+  float flash = exp(-d*d/(2.0*pow(12.0+uR*0.05, 2.0)))*pow(1.0-uK, 6.0)*1.3;
   float a = ring*fade*0.12 + flash;
   o = vec4(col*a*uExposure, 1.0);
 }`;
@@ -315,7 +357,6 @@ void main(){
   vec2 p = (vUv-0.5)*vec2(uAspect,1.0);
   float d = length(p)/0.72;
   float vig = smoothstep(0.62, 1.18, d)*0.40;
-  vig += smoothstep(0.10, 0.0, vUv.y)*0.10;     // settle the very bottom
   o = vec4(0.0, 0.0, 0.0, vig);
 }`;
 
@@ -327,7 +368,7 @@ uniform float uTime;
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 void main(){
   float n = hash12(vUv*uRes + fract(uTime*0.731)*913.7);
-  float g = max(0.0, n-0.55)*0.030;             // sparse positive sensor noise
+  float g = max(0.0, n-0.55)*0.030;
   o = vec4(vec3(g), 1.0);
 }`;
 
@@ -361,8 +402,7 @@ void main(){
 
   // ------------------------------------------------------------- Star colors
   function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
-  // Session-stable PRNG: resize re-seeds with the same sequence, so the sky
-  // doesn't reshuffle on every window drag / mobile URL-bar collapse.
+  // Session-stable PRNG: rebuilds (context restore) regenerate the same sky.
   function mulberry32(a) {
     return function () {
       a |= 0; a = a + 0x6D2B79F5 | 0;
@@ -372,7 +412,7 @@ void main(){
     };
   }
   const SESSION_SEED = (Math.random() * 0x7fffffff) | 0;
-  let srand = Math.random;        // rebound to the seeded stream in buildStars
+  let srand = Math.random;        // rebound to the seeded stream in build
   function kelvinRGB(kelvin) {
     const k = kelvin / 100;
     let r, g, b;
@@ -385,10 +425,10 @@ void main(){
   function pickTemperature(bright) {
     const r = srand();
     if (bright) {
-      if (r < 0.35) return 9500 + srand() * 9000;   // blue-white giants
+      if (r < 0.35) return 9500 + srand() * 9000;
       if (r < 0.60) return 6800 + srand() * 2200;
       if (r < 0.82) return 5000 + srand() * 1500;
-      return 3100 + srand() * 1200;                  // orange/red giants
+      return 3100 + srand() * 1200;
     }
     if (r < 0.10) return 8500 + srand() * 6000;
     if (r < 0.55) return 5400 + srand() * 2800;
@@ -404,55 +444,93 @@ void main(){
     return 0.450 + 0.480 * srand();
   }
 
+  // ------------------------------------------------------- Galaxy directions
+  // Galactic plane basis (fixed world geometry, shared by bake + star seeding).
+  const GAL_N = norm3([0.40, 0.86, 0.26]);          // plane normal
+  const GAL_E1 = norm3(cross3(GAL_N, [0, 0, 1]));
+  const GAL_E2 = cross3(GAL_N, GAL_E1);
+  const CORE_PSI = 0.6;                             // core azimuth on the plane
+  const CORE_DIR = planeDir(CORE_PSI, 0);
+  const NEB_A = planeDir(CORE_PSI + 0.55, 0.10);
+  const NEB_B = planeDir(CORE_PSI - 2.2, -0.55);   // cool landmark for the dark hemisphere
+
+  function norm3(v) {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  }
+  function cross3(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+  // Direction on/near the galactic plane: azimuth psi, elevation off-plane.
+  function planeDir(psi, off) {
+    const cp = Math.cos(psi), sp = Math.sin(psi);
+    const co = Math.cos(off), so = Math.sin(off);
+    return norm3([
+      (GAL_E1[0] * cp + GAL_E2[0] * sp) * co + GAL_N[0] * so,
+      (GAL_E1[1] * cp + GAL_E2[1] * sp) * co + GAL_N[1] * so,
+      (GAL_E1[2] * cp + GAL_E2[2] * sp) * co + GAL_N[2] * so,
+    ]);
+  }
+
   // --------------------------------------------------------------- Programs
   let progBake, progBg, progStars, progLines, progStreak, progRing, progVig, progGrain;
   let uBake, uBg, uStars, uLines, uStreak, uRing, uVig, uGrain;
-  let vaoFull, vaoStars, vaoSat, vaoLines, vaoStreak, vaoRing;
-  let bufFull, bufStars, bufSat, bufLines, bufStreak, bufRing;
+  let vaoFull, vaoShell, vaoVol, vaoLines, vaoStreak, vaoRing;
+  let bufFull, bufShell, bufVol, bufLines, bufStreak, bufRing;
   let skyTex = null, skyFbo = null;
   let maxPointSize = 64;
 
   // ------------------------------------------------------------------ State
   let W = 0, H = 0, DPR = 1;
-  let pole = [0, 0], Rmax = 1;
-  let starCount = 0, starDrawCount = 0;
-  const STAR_STRIDE = 10;                        // floats per star
-  let brightSet = [];                            // {x,y,depth} for constellation overlay
-  let startMs = -1;
-  let lastMs = -1;
-  let theta = 0;
-  let parX = 0, parY = 0;                        // smoothed parallax
+  let shellCount = 0, shellDrawCount = 0;
+  let volCount = 0, volDrawCount = 0;
+  const STAR_STRIDE = 10;                        // pos3 color3 I twk3
+  let brightSet = [];                            // unit dirs of chart stars
+  let startMs = -1, lastMs = -1;
   let mouseStr = 0;
-  let quality = 0;                               // 0 full, 1 dpr=1, 2 trimmed, 3 minimal
+  let quality = 0;
   let grainOn = true;
   let contextLost = false;
 
-  // Meteors / satellite / pulses
-  const meteors = [];                            // {x,y,dx,dy,speed,len,bright,mix,born,dies,dead}
-  let nextMeteorAt = CFG.FIRST_METEOR_AT;
-  let satellite = null;                          // {x,y,dx,dy,speed,until}
-  let nextSatAt = 15000 + Math.random() * CFG.SAT_RAND_GAP;
-  const seenPulses = new WeakSet();
-  const wishQueue = [];                          // spawn times for click meteors
-  let pulsesRef = null;                          // last-seen shared pulses array
+  // Camera
+  let yaw = -0.614, pitch = 0.162;               // opening: core low-left, band sweeps up-right
+  let yawVel = 0, pitchVel = 0;
+  let camPos = [0, 0, 0];
+  const driftDir = norm3(CFG.DRIFT_DIR);
+  let lastInputAt = 0;            // idle pan eases in IDLE_AFTER ms after load
+  let hoverYaw = 0, hoverPitch = 0;
+  const camMat = new Float32Array(9);
 
-  // Scratch buffers (no per-frame allocation)
+  // Sky objects
+  const meteors = [];                            // world-space 3D streaks
+  let nextMeteorAt = CFG.FIRST_METEOR_AT;
+  let beacon = null;                             // far drifting dot
+  let nextBeaconAt = 18000 + Math.random() * CFG.BEACON_RAND_GAP;
+  const seenPulses = new WeakSet();
+  const wishQueue = [];
+  let pulsesRef = null;
+  let lastPulseAt = -1e9;                        // suppress chart during shockwave
+  const camS = [0, 0, 0];                        // sway-included camera (unwrapped)
+
+  // Scratch (no per-frame allocation)
   const MAX_STREAK_QUADS = 8;
-  const streakVerts = new Float32Array(MAX_STREAK_QUADS * 6 * 6); // 6 verts × (pos2 uv2 meta2)
+  const streakVerts = new Float32Array(MAX_STREAK_QUADS * 6 * 6);
   const MAX_LINES = 64;
-  const lineVerts = new Float32Array(MAX_LINES * 2 * 3);          // 2 verts × (pos2 alpha)
-  const satVerts = new Float32Array(2 * STAR_STRIDE);
+  const lineVerts = new Float32Array(MAX_LINES * 2 * 3);
   const pulseUni = new Float32Array(CFG.MAX_PULSES * 4);
+  const V3A = [0, 0, 0], V3B = [0, 0, 0];
+  const PRJ = [0, 0, 0];                         // x px, y px, ok flag
 
   // ------------------------------------------------------------- Build steps
   function buildPrograms() {
     progBake = program(VS_FULL, FS_BAKE);
-    uBake = uniforms(progBake, ['uRmax', 'uBandC', 'uBandDir', 'uBandSigma', 'uCoreAlong', 'uNebA', 'uNebB']);
+    uBake = uniforms(progBake, ['uGalN', 'uCoreDir', 'uNebDirA', 'uNebDirB']);
     progBg = program(VS_FULL, FS_BG);
-    uBg = uniforms(progBg, ['uTex', 'uRes', 'uPole', 'uRot', 'uShift', 'uRmax', 'uZoom', 'uExposure']);
+    uBg = uniforms(progBg, ['uTex', 'uCam', 'uTanHalf', 'uAspect', 'uExposure']);
     progStars = program(VS_STARS, FS_STARS);
-    uStars = uniforms(progStars, ['uRes', 'uPole', 'uRot', 'uPar', 'uMouse', 'uDpr', 'uTime', 'uZoom',
-      'uMouseStr', 'uRotMix', 'uMaxPt', 'uPulseCount', 'uExposure']);
+    uStars = uniforms(progStars, ['uCam', 'uCamPos', 'uRes', 'uMouse', 'uDpr', 'uTime',
+      'uTanHalf', 'uAspect', 'uMouseStr', 'uMaxPt', 'uExposure',
+      'uShell', 'uWrap', 'uD0', 'uVolGain', 'uNearClamp', 'uPulseCount']);
     uStars.uPulse = gl.getUniformLocation(progStars, 'uPulse[0]') ||
                     gl.getUniformLocation(progStars, 'uPulse');
     progLines = program(VS_LINES, FS_LINES);
@@ -467,13 +545,22 @@ void main(){
     uGrain = uniforms(progGrain, ['uRes', 'uTime']);
 
     const range = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
-    // Device-px cap for gl_PointSize: never hand the FS a sprite size the
-    // rasterizer will silently clamp, or hero PSF math goes wrong.
     maxPointSize = Math.min(range[1] || 64, 128);
   }
 
+  function bindStarAttribs() {
+    const S = STAR_STRIDE * 4;
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, S, 0);   // aPos
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, S, 12);  // aColor
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, S, 24);  // aIntensity
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 3, gl.FLOAT, false, S, 28);  // aTwk
+  }
+
   function buildStaticBuffers() {
-    // Fullscreen triangle
     vaoFull = gl.createVertexArray();
     gl.bindVertexArray(vaoFull);
     bufFull = gl.createBuffer();
@@ -482,7 +569,6 @@ void main(){
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-    // Unit quad for rings
     vaoRing = gl.createVertexArray();
     gl.bindVertexArray(vaoRing);
     bufRing = gl.createBuffer();
@@ -491,7 +577,6 @@ void main(){
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-    // Dynamic: constellation lines
     vaoLines = gl.createVertexArray();
     gl.bindVertexArray(vaoLines);
     bufLines = gl.createBuffer();
@@ -502,7 +587,6 @@ void main(){
     gl.enableVertexAttribArray(1);
     gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 12, 8);
 
-    // Dynamic: meteor/streak quads
     vaoStreak = gl.createVertexArray();
     gl.bindVertexArray(vaoStreak);
     bufStreak = gl.createBuffer();
@@ -515,155 +599,122 @@ void main(){
     gl.enableVertexAttribArray(2);
     gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 24, 16);
 
-    // Dynamic: satellite (rendered through the star program, uRotMix=0)
-    vaoSat = gl.createVertexArray();
-    gl.bindVertexArray(vaoSat);
-    bufSat = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, bufSat);
-    gl.bufferData(gl.ARRAY_BUFFER, satVerts.byteLength, gl.DYNAMIC_DRAW);
-    bindStarAttribs();
-
     gl.bindVertexArray(null);
   }
 
-  function bindStarAttribs() {
-    const S = STAR_STRIDE * 4;
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, S, 0);   // aPos
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 1, gl.FLOAT, false, S, 8);   // aDepth
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, S, 12);  // aColor
-    gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, S, 24);  // aIntensity
-    gl.enableVertexAttribArray(4);
-    gl.vertexAttribPointer(4, 3, gl.FLOAT, false, S, 28);  // aTwk
+  // Gaussian-ish sample via Irwin–Hall.
+  function gauss() { return (srand() + srand() + srand()) / 1.5 - 1; }
+
+  // Random unit direction, optionally clustered around the galactic plane.
+  function randomDir(banded) {
+    if (banded) {
+      const psi = srand() * Math.PI * 2;
+      const off = gauss() * 0.16;
+      return planeDir(psi, off);
+    }
+    const z = srand() * 2 - 1;
+    const a = srand() * Math.PI * 2;
+    const r = Math.sqrt(Math.max(0, 1 - z * z));
+    return [Math.cos(a) * r, Math.sin(a) * r, z];
   }
 
-  // Band geometry in pole-relative world coords (shared by bake + star seeding).
-  function bandGeometry() {
-    // Portrait: steepen the band and push the core toward a lower corner so
-    // the cool blue stretch crosses the upper half of a phone screen.
-    const portrait = H > W;
-    const angle = portrait ? -0.95 : CFG.BAND_ANGLE;
-    const dir = [Math.cos(angle), Math.sin(angle)];
-    const cScreen = portrait ? [W * 0.42, H * 0.62] : [W * 0.46, H * 0.64];
-    const c = [cScreen[0] - pole[0], cScreen[1] - pole[1]];
-    const coreAlong = (portrait ? -0.34 : -0.22) * Rmax;
-    return { dir, c, sigma: 0.16 * Rmax, coreAlong };
+  function writeStar(data, o, x, y, z, I, bright, twAmpScale) {
+    const [cr, cg, cb] = kelvinRGB(pickTemperature(bright));
+    const sat = clamp01(0.30 + I * 1.1);
+    data[o] = x; data[o + 1] = y; data[o + 2] = z;
+    data[o + 3] = 1 + (cr - 1) * sat;
+    data[o + 4] = 1 + (cg - 1) * sat;
+    data[o + 5] = 1 + (cb - 1) * sat;
+    data[o + 6] = I;
+    data[o + 7] = (0.4 + srand() * 1.8) * Math.PI * 2;
+    data[o + 8] = srand() * Math.PI * 2;
+    data[o + 9] = (0.08 + 0.42 * (1 - clamp01((I - 0.05) / 0.55))) * twAmpScale;
   }
 
   function buildStars() {
-    // Density is per visible px²; scale by disc/viewport area ratio so the
-    // on-screen density holds no matter where the pole pushes Rmax.
-    const target = Math.round(Math.PI * Rmax * Rmax * CFG.STAR_DENSITY);
-    starCount = Math.max(CFG.STAR_MIN, Math.min(CFG.STAR_MAX, target));
-    const data = new Float32Array(starCount * STAR_STRIDE);
-    const band = bandGeometry();
-    const perp = [-band.dir[1], band.dir[0]];
-
     srand = mulberry32(SESSION_SEED);
     const hrand = mulberry32(SESSION_SEED ^ 0x9e3779b9);
-    const tmp = new Array(starCount);
-    for (let i = 0; i < starCount; i++) {
-      let x, y;
-      if (srand() < CFG.BAND_FRACTION) {
-        // Cluster along the galactic plane (gaussian across, uniform along).
-        const along = (srand() * 2.4 - 1.2) * Rmax;
-        let across = 0;
-        for (let k = 0; k < 3; k++) across += srand();   // Irwin–Hall ≈ gaussian
-        across = (across / 1.5 - 1) * band.sigma * 1.5;
-        x = band.c[0] + band.dir[0] * along + perp[0] * across;
-        y = band.c[1] + band.dir[1] * along + perp[1] * across;
-        const r = Math.hypot(x, y);
-        if (r > Rmax) { const s = (Rmax * 0.985) / r; x *= s; y *= s; }
-      } else {
-        const r = Rmax * Math.sqrt(srand());
-        const a = srand() * Math.PI * 2;
-        x = Math.cos(a) * r;
-        y = Math.sin(a) * r;
-      }
-      tmp[i] = { x, y, I: pickIntensity() };
+
+    // ---- Far shell: bright tier + powder, band-clustered, bright-first sort.
+    shellCount = CFG.SHELL_BRIGHT + CFG.SHELL_DUST;
+    const shell = new Float32Array(shellCount * STAR_STRIDE);
+    const tmp = new Array(shellCount);
+    for (let i = 0; i < CFG.SHELL_BRIGHT; i++) {
+      tmp[i] = { d: randomDir(srand() < CFG.BAND_FRACTION), I: pickIntensity() };
     }
-    // Hero tier — brilliant, spiked.
     for (let h = 0; h < CFG.HERO_COUNT; h++) {
-      const i = (hrand() * starCount) | 0;
+      const i = (hrand() * CFG.SHELL_BRIGHT) | 0;
       tmp[i].I = 1.3 + hrand() * 1.1;
     }
-    // Bright-first so quality fallback can truncate the tail (faint stars).
+    for (let i = CFG.SHELL_BRIGHT; i < shellCount; i++) {
+      // Powder: very faint, strongly banded — the granular glow of the band.
+      tmp[i] = { d: randomDir(srand() < 0.85), I: 0.016 + 0.060 * Math.pow(srand(), 1.3) };
+    }
     tmp.sort((a, b) => b.I - a.I);
-
     brightSet = [];
-    for (let i = 0; i < starCount; i++) {
+    for (let i = 0; i < shellCount; i++) {
       const s = tmp[i];
-      const bright = s.I > 0.4;
-      const [cr, cg, cb] = kelvinRGB(pickTemperature(bright));
-      // Faint stars desaturate toward white — the eye/photo sees little color in them.
-      const sat = clamp01(0.30 + s.I * 1.1);
-      const depth = srand() * srand();             // bias far
-      const o = i * STAR_STRIDE;
-      data[o] = s.x;
-      data[o + 1] = s.y;
-      data[o + 2] = bright ? Math.min(1, depth + 0.25) : depth;
-      data[o + 3] = 1 + (cr - 1) * sat;
-      data[o + 4] = 1 + (cg - 1) * sat;
-      data[o + 5] = 1 + (cb - 1) * sat;
-      data[o + 6] = s.I;
-      data[o + 7] = (0.4 + srand() * 1.8) * Math.PI * 2; // omega rad/s
-      data[o + 8] = srand() * Math.PI * 2;               // phase
-      data[o + 9] = 0.08 + 0.42 * (1 - clamp01((s.I - 0.05) / 0.55)); // amp: faint twinkles harder
+      writeStar(shell, i * STAR_STRIDE,
+        s.d[0] * CFG.R_FAR, s.d[1] * CFG.R_FAR, s.d[2] * CFG.R_FAR,
+        s.I, s.I > 0.4, 1);
       if (s.I >= 0.22 && brightSet.length < 420) {
-        brightSet.push({ x: s.x, y: s.y, depth: data[o + 2] });
+        brightSet.push({ x: s.d[0] * CFG.R_FAR, y: s.d[1] * CFG.R_FAR, z: s.d[2] * CFG.R_FAR });
       }
     }
+    vaoShell = vaoShell || gl.createVertexArray();
+    gl.bindVertexArray(vaoShell);
+    bufShell = bufShell || gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufShell);
+    gl.bufferData(gl.ARRAY_BUFFER, shell, gl.STATIC_DRAW);
+    bindStarAttribs();
 
-    vaoStars = vaoStars || gl.createVertexArray();
-    gl.bindVertexArray(vaoStars);
-    bufStars = bufStars || gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, bufStars);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    // ---- Volumetric tier: uniform in the wrap cube, luminosity-based.
+    volCount = CFG.VOLUME_STARS;
+    const vol = new Float32Array(volCount * STAR_STRIDE);
+    const vtmp = new Array(volCount);
+    for (let i = 0; i < volCount; i++) {
+      vtmp[i] = {
+        x: srand() * CFG.WRAP, y: srand() * CFG.WRAP, z: srand() * CFG.WRAP,
+        L: 0.04 + 0.5 * Math.pow(srand(), 3.0),
+      };
+    }
+    vtmp.sort((a, b) => b.L - a.L);
+    for (let i = 0; i < volCount; i++) {
+      const s = vtmp[i];
+      writeStar(vol, i * STAR_STRIDE, s.x, s.y, s.z, s.L, s.L > 0.3, 0.6);
+    }
+    vaoVol = vaoVol || gl.createVertexArray();
+    gl.bindVertexArray(vaoVol);
+    bufVol = bufVol || gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufVol);
+    gl.bufferData(gl.ARRAY_BUFFER, vol, gl.STATIC_DRAW);
     bindStarAttribs();
     gl.bindVertexArray(null);
 
-    starDrawCount = starCount;
     applyQualityCounts();
   }
 
   function bakeSky() {
-    const size = CFG.BAKE_SIZE;
     if (!skyTex) {
       skyTex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, skyTex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);       // lon seam
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       skyFbo = gl.createFramebuffer();
     }
     gl.bindTexture(gl.TEXTURE_2D, skyTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, CFG.BAKE_W, CFG.BAKE_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, skyFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, skyTex, 0);
-
-    const band = bandGeometry();
-    gl.viewport(0, 0, size, size);
+    gl.viewport(0, 0, CFG.BAKE_W, CFG.BAKE_H);
     gl.disable(gl.BLEND);
     gl.useProgram(progBake);
-    gl.uniform1f(uBake.uRmax, Rmax);
-    gl.uniform2f(uBake.uBandC, band.c[0], band.c[1]);
-    gl.uniform2f(uBake.uBandDir, band.dir[0], band.dir[1]);
-    gl.uniform1f(uBake.uBandSigma, band.sigma);
-    gl.uniform1f(uBake.uCoreAlong, band.coreAlong);
-    // Nebulae sit just off the band axis.
-    const perp = [-band.dir[1], band.dir[0]];
-    gl.uniform4f(uBake.uNebA,
-      band.c[0] + band.dir[0] * 0.34 * Rmax + perp[0] * 0.10 * Rmax,
-      band.c[1] + band.dir[1] * 0.34 * Rmax + perp[1] * 0.10 * Rmax,
-      0.085 * Rmax, 0.22);
-    gl.uniform4f(uBake.uNebB,
-      band.c[0] - band.dir[0] * 0.40 * Rmax - perp[0] * 0.14 * Rmax,
-      band.c[1] - band.dir[1] * 0.40 * Rmax - perp[1] * 0.14 * Rmax,
-      0.11 * Rmax, 0.12);
+    gl.uniform3f(uBake.uGalN, GAL_N[0], GAL_N[1], GAL_N[2]);
+    gl.uniform3f(uBake.uCoreDir, CORE_DIR[0], CORE_DIR[1], CORE_DIR[2]);
+    gl.uniform3f(uBake.uNebDirA, NEB_A[0], NEB_A[1], NEB_A[2]);
+    gl.uniform3f(uBake.uNebDirB, NEB_B[0], NEB_B[1], NEB_B[2]);
     gl.bindVertexArray(vaoFull);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -676,19 +727,12 @@ void main(){
     H = canvas.clientHeight || window.innerHeight;
     canvas.width = Math.max(1, Math.round(W * DPR));
     canvas.height = Math.max(1, Math.round(H * DPR));
-    pole = [W * CFG.POLE[0], H * CFG.POLE[1]];
-    // Disc must cover the farthest corner through a full rotation, plus parallax margin.
-    let r = 0;
-    for (const [cx, cy] of [[0, 0], [W, 0], [0, H], [W, H]]) {
-      r = Math.max(r, Math.hypot(cx - pole[0], cy - pole[1]));
-    }
-    Rmax = r + CFG.PARALLAX_NEAR + 60;
   }
 
   function applyQualityCounts() {
-    if (quality >= 3) starDrawCount = Math.round(starCount * 0.4);
-    else if (quality >= 2) starDrawCount = Math.round(starCount * 0.6);
-    else starDrawCount = starCount;
+    const f = quality >= 3 ? 0.4 : quality >= 2 ? 0.6 : 1;
+    shellDrawCount = Math.round(shellCount * f);
+    volDrawCount = Math.round(volCount * f);
     grainOn = quality < 2;
   }
 
@@ -703,79 +747,83 @@ void main(){
   }
 
   // ------------------------------------------------------------ Sky dynamics
-  function spawnMeteor(now, opts) {
-    if (meteors.length >= 4) return;
-    const band = bandGeometry();
-    // Direction roughly along the band ± spread, random sign.
-    const flip = Math.random() < 0.5 ? 1 : -1;
-    const jitter = (Math.random() - 0.5) * 0.9;
-    const ang = Math.atan2(band.dir[1] * flip, band.dir[0] * flip) + jitter;
-    const dx = Math.cos(ang), dy = Math.sin(ang);
-    // Start upstream so the streak crosses the viewport.
-    const px = (opts && opts.x != null) ? opts.x : W * (0.15 + Math.random() * 0.7);
-    const py = (opts && opts.y != null) ? opts.y : H * (0.10 + Math.random() * 0.55);
-    const lead = 200 + Math.random() * 300;
-    const speed = 1100 + Math.random() * 1000;
-    const travel = (Math.max(W, H) + 700) / speed * 1000;
+  function spawnMeteor(now, viewBias) {
+    if (meteors.length >= 4 || quality >= 3) return;
+    // Spawn in front of the camera at mid distance, flying tangentially.
+    const fx = -camMat[6], fy = -camMat[7], fz = -camMat[8];   // forward = -c2
+    const rx = camMat[0], ry = camMat[1], rz = camMat[2];      // right = c0
+    const ux = camMat[3], uy = camMat[4], uz = camMat[5];      // up = c1
+    const dist = 280 + Math.random() * 380;
+    const ox = (viewBias ? viewBias[0] : (Math.random() - 0.5) * 1.2);
+    const oy = (viewBias ? viewBias[1] : (Math.random() - 0.2) * 0.9);
+    const px = camS[0] + (fx + rx * ox + ux * oy) * dist;
+    const py = camS[1] + (fy + ry * ox + uy * oy) * dist;
+    const pz = camS[2] + (fz + rz * ox + uz * oy) * dist;
+    // Velocity: mostly tangential (across the view), slight camera-ward pull.
+    // Constrain the tangent near screen-horizontal so the streak crosses the
+    // view legibly instead of exiting the 68° FOV in a blink.
+    const ta = (Math.random() - 0.5) * 1.6 + (Math.random() < 0.5 ? 0 : Math.PI);
+    const tvx = rx * Math.cos(ta) + ux * Math.sin(ta);
+    const tvy = ry * Math.cos(ta) + uy * Math.sin(ta);
+    const tvz = rz * Math.cos(ta) + uz * Math.sin(ta);
+    const spd = 280 + Math.random() * 320;
     meteors.push({
-      x: px - dx * lead, y: py - dy * lead,
-      dx, dy, speed,
-      len: speed * (0.16 + Math.random() * 0.10),
+      x: px, y: py, z: pz,
+      vx: (tvx - fx * 0.25) * spd, vy: (tvy - fy * 0.25) * spd, vz: (tvz - fz * 0.25) * spd,
       bright: 0.7 + Math.random() * 1.0,
       mix: Math.random() < 0.3 ? 1 : 0,
-      born: now, dies: now + travel, dead: 0,
+      born: now, dies: now + 1900 + Math.random() * 1100, dead: 0,
     });
   }
 
-  function spawnSatellite(now) {
-    const fromLeft = Math.random() < 0.5;
-    const y0 = H * (0.12 + Math.random() * 0.6);
-    const y1 = H * (0.12 + Math.random() * 0.6);
-    const x0 = fromLeft ? -20 : W + 20;
-    const x1 = fromLeft ? W + 20 : -20;
-    const d = Math.hypot(x1 - x0, y1 - y0);
-    const speed = 24 + Math.random() * 14;          // px/s — slow, deliberate
-    satellite = {
-      x: x0, y: y0,
-      dx: (x1 - x0) / d, dy: (y1 - y0) / d,
-      speed, until: now + (d / speed) * 1000,
-    };
+  function spawnBeacon(now) {
+    // A far, slow drifter — reads as a distant station catching sunlight.
+    const d = randomDir(false);
+    const axis = randomDir(false);
+    beacon = { d, axis, w: 0.012 + Math.random() * 0.01, until: now + 60000 };
+  }
+
+  function rotateAround(v, axis, ang) {
+    // Rodrigues, allocation-free into V3A.
+    const c = Math.cos(ang), s = Math.sin(ang), t = 1 - c;
+    const [x, y, z] = v, [ax, ay, az] = axis;
+    const dot = ax * x + ay * y + az * z;
+    V3A[0] = x * c + (ay * z - az * y) * s + ax * dot * t;
+    V3A[1] = y * c + (az * x - ax * z) * s + ay * dot * t;
+    V3A[2] = z * c + (ax * y - ay * x) * s + az * dot * t;
+    return V3A;
   }
 
   function updateSky(now, dt, pulses) {
-    // Spontaneous + choreographed meteors.
     if (now >= nextMeteorAt) {
       spawnMeteor(now);
       nextMeteorAt = now + CFG.METEOR_MIN_GAP + Math.random() * CFG.METEOR_RAND_GAP;
     }
     while (wishQueue.length && now >= wishQueue[0].at) {
       const w = wishQueue.shift();
-      spawnMeteor(now, { x: w.x, y: Math.min(w.y, H * 0.5) });
+      spawnMeteor(now, w.bias);
     }
     for (let i = meteors.length - 1; i >= 0; i--) {
       const m = meteors[i];
-      m.x += m.dx * m.speed * dt;
-      m.y += m.dy * m.speed * dt;
+      m.x += m.vx * dt; m.y += m.vy * dt; m.z += m.vz * dt;
       if (now > m.dies && !m.dead) m.dead = now;
       if (m.dead && now - m.dead > 650) meteors.splice(i, 1);
     }
-    // Satellite lifecycle.
-    if (!satellite && now >= nextSatAt && quality < 3) {
-      spawnSatellite(now);
-    } else if (satellite) {
-      satellite.x += satellite.dx * satellite.speed * dt;
-      satellite.y += satellite.dy * satellite.speed * dt;
-      if (now > satellite.until) {
-        satellite = null;
-        nextSatAt = now + CFG.SAT_MIN_GAP + Math.random() * CFG.SAT_RAND_GAP;
-      }
+    if (!beacon && now >= nextBeaconAt && quality < 3) {
+      spawnBeacon(now);
+    } else if (beacon && now > beacon.until) {
+      beacon = null;
+      nextBeaconAt = now + CFG.BEACON_MIN_GAP + Math.random() * CFG.BEACON_RAND_GAP;
     }
-    // Pulses: GL owns aging; a fresh pulse also queues a wish meteor.
     for (let i = pulses.length - 1; i >= 0; i--) {
       const p = pulses[i];
       if (!seenPulses.has(p)) {
         seenPulses.add(p);
-        wishQueue.push({ at: now + 260, x: p.x + (Math.random() - 0.5) * 300, y: p.y });
+        // Wish meteor flies through the clicked direction a beat later.
+        const bx = (p.x / W - 0.5) * 1.6;
+        const by = (0.5 - p.y / H) * 1.0;
+        wishQueue.push({ at: now + 260, bias: [bx, by] });
+        lastPulseAt = now;
       }
       p.age += dt * 1000;
       if (p.age >= CFG.PULSE_LIFE) pulses.splice(i, 1);
@@ -785,38 +833,38 @@ void main(){
   // --------------------------------------------------------------- Geometry
   function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
-  // CPU twin of the star vertex transform (for overlay lines + streak parallax).
-  // Writes into a shared scratch pair — zero allocation on the hot path.
-  const TP = [0, 0];
-  function transformPoint(x, y, depth, cosT, sinT, zoom) {
-    let px = x * cosT - y * sinT + pole[0];
-    let py = x * sinT + y * cosT + pole[1];
-    const par = 0.25 + 0.75 * depth;
-    px += parX * par;
-    py += parY * par;
-    const cx = W * 0.5, cy = H * 0.5;
-    TP[0] = cx + (px - cx) * zoom;
-    TP[1] = cy + (py - cy) * zoom;
-    return TP;
+  // World-relative-to-camera point -> screen px. Returns false if behind.
+  function project(rx, ry, rz, tanHalf) {
+    // view = camMatᵀ · rel  (columns of camMat are the camera axes)
+    const vx = camMat[0] * rx + camMat[1] * ry + camMat[2] * rz;
+    const vy = camMat[3] * rx + camMat[4] * ry + camMat[5] * rz;
+    const vz = camMat[6] * rx + camMat[7] * ry + camMat[8] * rz;
+    if (vz > -2) return false;
+    const invZ = -1 / vz;
+    const nx = (vx / (W / H)) * invZ / tanHalf;
+    const ny = vy * invZ / tanHalf;
+    PRJ[0] = (nx * 0.5 + 0.5) * W;
+    PRJ[1] = (0.5 - ny * 0.5) * H;
+    return true;
   }
 
-  // Pooled nodes: collecting ~400 candidates per frame must not churn the GC.
+  // Pooled constellation nodes.
   const NODE_POOL_MAX = 420;
   const lineNodes = new Array(NODE_POOL_MAX);
   for (let i = 0; i < NODE_POOL_MAX; i++) lineNodes[i] = { x: 0, y: 0, d: 0 };
-  function buildConstellation(mouse, cosT, sinT, zoom) {
-    if (!mouse.active || mouse.x == null || mouseStr < 0.02) return 0;
+  function buildConstellation(mouse, look, tanHalf, now) {
+    if (!mouse.active || mouse.x == null || mouseStr < 0.02 || look.dragging) return 0;
+    if (now - lastPulseAt < 600) return 0;       // let the shockwave own the moment
     let count = 0;
     for (let i = 0; i < brightSet.length && count < NODE_POOL_MAX; i++) {
       const b = brightSet[i];
-      const p = transformPoint(b.x, b.y, b.depth, cosT, sinT, zoom);
-      const d = Math.hypot(p[0] - mouse.x, p[1] - mouse.y);
+      if (!project(b.x, b.y, b.z, tanHalf)) continue;
+      const d = Math.hypot(PRJ[0] - mouse.x, PRJ[1] - mouse.y);
       if (d < CFG.LINE_REACH) {
         const n = lineNodes[count++];
-        n.x = p[0]; n.y = p[1]; n.d = d;
+        n.x = PRJ[0]; n.y = PRJ[1]; n.d = d;
       }
     }
-    // Partial selection: move the K nearest nodes to the front (K is tiny).
     const K = Math.min(CFG.LINE_NODES, count);
     for (let i = 0; i < K; i++) {
       let best = i;
@@ -845,7 +893,6 @@ void main(){
   }
 
   function emitStreakQuad(out, base, hx, hy, tx, ty, halfW, alpha, mix) {
-    // Two triangles: head edge (uv.x=0) -> tail edge (uv.x=1). Direct stores.
     const dx = tx - hx, dy = ty - hy;
     const L = Math.hypot(dx, dy) || 1;
     const px = -dy / L * halfW, py = dx / L * halfW;
@@ -859,7 +906,7 @@ void main(){
     return o;
   }
 
-  function buildStreaks(now) {
+  function buildStreaks(now, tanHalf) {
     let o = 0, quads = 0;
     for (const m of meteors) {
       if (quads >= MAX_STREAK_QUADS) break;
@@ -867,49 +914,118 @@ void main(){
       const fade = m.dead ? Math.max(0, 1 - (now - m.dead) / 650) : 1;
       const alpha = m.bright * lifeIn * fade * fade;
       if (alpha <= 0.01) continue;
-      const hx = m.x + parX * 1.05, hy = m.y + parY * 1.05;
-      const tx = hx - m.dx * m.len, ty = hy - m.dy * m.len;
-      o = emitStreakQuad(streakVerts, o, hx, hy, tx, ty, 3.2, alpha, m.mix);
+      const trail = 0.22;                       // s of motion forming the tail
+      if (!project(m.x - camS[0], m.y - camS[1], m.z - camS[2], tanHalf)) continue;
+      const hx = PRJ[0], hy = PRJ[1];
+      if (!project(m.x - m.vx * trail - camS[0], m.y - m.vy * trail - camS[1], m.z - m.vz * trail - camS[2], tanHalf)) continue;
+      o = emitStreakQuad(streakVerts, o, hx, hy, PRJ[0], PRJ[1], 3.2, alpha, m.mix);
       quads++;
+    }
+    if (beacon) {
+      // Slowly rotating far direction; rendered as a near-dot streak.
+      const d = beacon.d;
+      if (project(d[0] * CFG.R_FAR, d[1] * CFG.R_FAR, d[2] * CFG.R_FAR, tanHalf) && quads < MAX_STREAK_QUADS) {
+        const glint = 0.18 + 0.90 * Math.pow(Math.max(0, Math.sin(now * 0.0011)), 16);
+        o = emitStreakQuad(streakVerts, o, PRJ[0], PRJ[1], PRJ[0] + 2.5, PRJ[1] + 1.2, 1.4, glint, 0);
+        quads++;
+      }
     }
     return quads;
   }
 
   // ------------------------------------------------------------------ Frame
-  function frame(tMs, mouse, pulses) {
+  function frame(tMs, mouse, pulses, look) {
     pulsesRef = pulses;
     if (contextLost) return;
     if (startMs < 0) { startMs = tMs; lastMs = tMs; }
     const now = tMs - startMs;
+    const rawDt = Math.max((tMs - lastMs) / 1000, 0.008);   // for drag velocity
     const dt = Math.min((tMs - lastMs) / 1000, 0.05) || 0.016;
     lastMs = tMs;
-
-    theta = now / 1000 * CFG.ROT_RATE;
-    const cosT = Math.cos(theta), sinT = Math.sin(theta);
     const uTime = (now / 1000) % 4096;
 
-    // Opening choreography.
+    // Opening choreography: exposure bloom + wide-angle settle + speed ramp.
     const exposure = Math.min(1, now / 1000 / CFG.EXPOSURE_S);
-    const exp2 = exposure * exposure * (3 - 2 * exposure);    // smoothstep
-    const settle = Math.min(1, now / 1000 / CFG.ZOOM_SETTLE_S);
-    const zoom = 1.05 - 0.05 * easeOutCubic(settle);
+    const exp2 = exposure * exposure * (3 - 2 * exposure);
+    const settle = easeOutCubic(Math.min(1, now / 1000 / CFG.SETTLE_S));
+    const fov = CFG.FOV_SETTLE + (CFG.FOV_Y - CFG.FOV_SETTLE) * settle;
+    const tanHalf = Math.tan(fov / 2);
 
-    // Parallax target: cursor offset from center, plus an idle lissajous drift.
-    let tx = Math.sin(now * 0.00005) * 6, ty = Math.cos(now * 0.000037) * 6;
-    if (mouse.active && mouse.x != null) {
-      tx += ((mouse.x / W) - 0.5) * 2 * CFG.PARALLAX_NEAR;
-      ty += ((mouse.y / H) - 0.5) * 2 * CFG.PARALLAX_NEAR;
+    // --- Camera: drag (grab the sky) + fling inertia + idle auto-pan.
+    const sens = (look.pointerType === 'touch' ? CFG.DRAG_SENS_TOUCH : CFG.DRAG_SENS);
+    if (look.dx !== 0 || look.dy !== 0) {
+      yaw += look.dx * sens;
+      pitch += look.dy * sens;
+      // Release velocity: EMA over recent frames against the REAL frame gap
+      // (clamped dt would 4x-overshoot on a rAF stall), capped to stay civil.
+      const instY = look.dx * sens / rawDt;
+      const instP = look.dy * sens / rawDt;
+      yawVel += (instY - yawVel) * 0.45;
+      pitchVel += (instP - pitchVel) * 0.45;
+      const mag = Math.hypot(yawVel, pitchVel);
+      if (mag > CFG.FLING_MAX) {
+        const s = CFG.FLING_MAX / mag;
+        yawVel *= s; pitchVel *= s;
+      }
+      look.dx = 0; look.dy = 0;
+      lastInputAt = now;
+    } else if (look.dragging) {
+      // Holding still mid-drag: bleed velocity fast so release ≠ phantom fling.
+      const hold = Math.exp(-14 * dt);
+      yawVel *= hold; pitchVel *= hold;
+    } else {
+      yaw += yawVel * dt;
+      pitch += pitchVel * dt;
+      const damp = Math.exp(-CFG.FLING_DAMP * dt);
+      yawVel *= damp; pitchVel *= damp;
     }
-    const k = 1 - Math.exp(-dt * 3.2);
-    parX += (tx - parX) * k;
-    parY += (ty - parY) * k;
+    if (look.dragging) lastInputAt = now;
+    // Idle: slow pan so the sky is never frozen.
+    if (now - lastInputAt > CFG.IDLE_AFTER) {
+      const idleIn = Math.min(1, (now - lastInputAt - CFG.IDLE_AFTER) / 4000);
+      yaw += CFG.IDLE_YAW_RATE * idleIn * dt;
+      pitch += Math.cos(now * 0.00007) * 0.006 * idleIn * dt;
+    }
+    const pitchClamped = Math.max(-CFG.PITCH_MAX, Math.min(CFG.PITCH_MAX, pitch));
+    if (pitchClamped !== pitch) pitchVel = 0;    // don't pin a fling at the pole
+    pitch = pitchClamped;
 
-    const strTarget = (mouse.active && mouse.x != null) ? 1 : 0;
+    // Hover micro-look (desktop): the view leans gently toward the cursor.
+    let hTargetY = 0, hTargetP = 0;
+    if (mouse.active && mouse.x != null && !look.dragging) {
+      hTargetY = ((mouse.x / W) - 0.5) * 2 * CFG.HOVER_LOOK;
+      hTargetP = (0.5 - (mouse.y / H)) * 2 * CFG.HOVER_LOOK;
+    }
+    const hk = 1 - Math.exp(-dt * 3.2);
+    hoverYaw += (hTargetY - hoverYaw) * hk;
+    hoverPitch += (hTargetP - hoverPitch) * hk;
+
+    const cy = Math.cos(yaw + hoverYaw), sy = Math.sin(yaw + hoverYaw);
+    const cp = Math.cos(pitch + hoverPitch), sp = Math.sin(pitch + hoverPitch);
+    // R = Ry(yaw)·Rx(pitch), column-major.
+    camMat[0] = cy;       camMat[1] = 0;   camMat[2] = -sy;
+    camMat[3] = sy * sp;  camMat[4] = cp;  camMat[5] = cy * sp;
+    camMat[6] = sy * cp;  camMat[7] = -sp; camMat[8] = cy * cp;
+
+    // --- Drift: constant world direction + breathing sway; wrap for precision.
+    const speed = CFG.DRIFT_SPEED * settle;
+    camPos[0] += driftDir[0] * speed * dt;
+    camPos[1] += driftDir[1] * speed * dt;
+    camPos[2] += driftDir[2] * speed * dt;
+    const swx = Math.sin(now * 0.00011) * CFG.SWAY_AMP;
+    const swy = Math.cos(now * 0.000073) * CFG.SWAY_AMP * 0.7;
+    camS[0] = camPos[0] + swx;
+    camS[1] = camPos[1] + swy;
+    camS[2] = camPos[2];
+    const cpx = (camS[0] % CFG.WRAP + CFG.WRAP) % CFG.WRAP;
+    const cpy = (camS[1] % CFG.WRAP + CFG.WRAP) % CFG.WRAP;
+    const cpz = (camS[2] % CFG.WRAP + CFG.WRAP) % CFG.WRAP;
+
+    const strTarget = (mouse.active && mouse.x != null && !look.dragging) ? 1 : 0;
     mouseStr += (strTarget - mouseStr) * (1 - Math.exp(-dt * 4));
 
     updateSky(now, dt, pulses);
 
-    // Pulse uniforms (shared by star brighten + ring draws).
     const pulseCount = Math.min(pulses.length, CFG.MAX_PULSES);
     for (let i = 0; i < pulseCount; i++) {
       const p = pulses[i];
@@ -922,63 +1038,50 @@ void main(){
 
     gl.viewport(0, 0, canvas.width, canvas.height);
 
-    // 1 — baked sky.
+    // 1 — sky sphere.
     gl.disable(gl.BLEND);
     gl.useProgram(progBg);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, skyTex);
     gl.uniform1i(uBg.uTex, 0);
-    gl.uniform2f(uBg.uRes, W, H);
-    gl.uniform2f(uBg.uPole, pole[0], pole[1]);
-    gl.uniform2f(uBg.uRot, cosT, sinT);
-    gl.uniform2f(uBg.uShift, parX * (CFG.PARALLAX_BG / CFG.PARALLAX_NEAR), parY * (CFG.PARALLAX_BG / CFG.PARALLAX_NEAR));
-    gl.uniform1f(uBg.uRmax, Rmax);
-    gl.uniform1f(uBg.uZoom, zoom);
+    gl.uniformMatrix3fv(uBg.uCam, false, camMat);
+    gl.uniform1f(uBg.uTanHalf, tanHalf);
+    gl.uniform1f(uBg.uAspect, W / H);
     gl.uniform1f(uBg.uExposure, exp2);
     gl.bindVertexArray(vaoFull);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // Everything else is additive light.
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
 
-    // 2 — stars.
+    // 2 — stars: far shell, then volumetric fly-through tier.
     gl.useProgram(progStars);
+    gl.uniformMatrix3fv(uStars.uCam, false, camMat);
+    gl.uniform3f(uStars.uCamPos, cpx, cpy, cpz);
     gl.uniform2f(uStars.uRes, W, H);
-    gl.uniform2f(uStars.uPole, pole[0], pole[1]);
-    gl.uniform2f(uStars.uRot, cosT, sinT);
-    gl.uniform2f(uStars.uPar, parX, parY);
     gl.uniform2f(uStars.uMouse, mouse.x == null ? -9999 : mouse.x, mouse.y == null ? -9999 : mouse.y);
     gl.uniform1f(uStars.uDpr, DPR);
     gl.uniform1f(uStars.uTime, uTime);
-    gl.uniform1f(uStars.uZoom, zoom);
+    gl.uniform1f(uStars.uTanHalf, tanHalf);
+    gl.uniform1f(uStars.uAspect, W / H);
     gl.uniform1f(uStars.uMouseStr, mouseStr);
-    gl.uniform1f(uStars.uRotMix, 1);
     gl.uniform1f(uStars.uMaxPt, maxPointSize);
     gl.uniform1f(uStars.uExposure, exp2);
+    gl.uniform1f(uStars.uWrap, CFG.WRAP);
+    gl.uniform1f(uStars.uD0, CFG.D0);
+    gl.uniform1f(uStars.uVolGain, CFG.VOL_GAIN);
+    gl.uniform1f(uStars.uNearClamp, CFG.NEAR_CLAMP);
     gl.uniform4fv(uStars.uPulse, pulseUni);
     gl.uniform1i(uStars.uPulseCount, pulseCount);
-    gl.bindVertexArray(vaoStars);
-    gl.drawArrays(gl.POINTS, 0, starDrawCount);
+    gl.uniform1f(uStars.uShell, 1);
+    gl.bindVertexArray(vaoShell);
+    gl.drawArrays(gl.POINTS, 0, shellDrawCount);
+    gl.uniform1f(uStars.uShell, 0);
+    gl.bindVertexArray(vaoVol);
+    gl.drawArrays(gl.POINTS, 0, volDrawCount);
 
-    // 2b — satellite, same program, no sky rotation.
-    if (satellite) {
-      const glint = 0.16 + 0.45 * Math.pow(Math.max(0, Math.sin(now * 0.0009)), 16);
-      satVerts[0] = satellite.x - pole[0];
-      satVerts[1] = satellite.y - pole[1];
-      satVerts[2] = 0.9;                       // near depth
-      satVerts[3] = 0.85; satVerts[4] = 0.88; satVerts[5] = 0.92;
-      satVerts[6] = glint;
-      satVerts[7] = 0.0; satVerts[8] = 0.0; satVerts[9] = 0.0;
-      gl.uniform1f(uStars.uRotMix, 0);
-      gl.bindVertexArray(vaoSat);
-      gl.bindBuffer(gl.ARRAY_BUFFER, bufSat);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, satVerts, 0, STAR_STRIDE);
-      gl.drawArrays(gl.POINTS, 0, 1);
-    }
-
-    // 3 — constellation overlay.
-    const lines = buildConstellation(mouse, cosT, sinT, zoom);
+    // 3 — constellation chart near the cursor.
+    const lines = buildConstellation(mouse, look, tanHalf, now);
     if (lines > 0) {
       gl.useProgram(progLines);
       gl.uniform2f(uLines.uRes, W, H);
@@ -990,8 +1093,8 @@ void main(){
       gl.drawArrays(gl.LINES, 0, lines * 2);
     }
 
-    // 4 — meteors.
-    const quads = buildStreaks(now);
+    // 4 — meteors + beacon.
+    const quads = buildStreaks(now, tanHalf);
     if (quads > 0) {
       gl.useProgram(progStreak);
       gl.uniform2f(uStreak.uRes, W, H);
@@ -1012,7 +1115,7 @@ void main(){
       for (let i = 0; i < pulseCount; i++) {
         const r = pulseUni[i * 4 + 2];
         const kk = Math.min(1, pulses[i].age / CFG.PULSE_LIFE);
-        const w = 16 + 30 * kk;
+        const w = 10 + 18 * kk;
         gl.uniform2f(uRing.uCenter, pulseUni[i * 4], pulseUni[i * 4 + 1]);
         gl.uniform1f(uRing.uHalf, r + w * 4 + 40);
         gl.uniform1f(uRing.uR, r);
@@ -1022,7 +1125,7 @@ void main(){
       }
     }
 
-    // 6 — vignette (alpha-over), then grain (additive).
+    // 6 — vignette, then grain.
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.useProgram(progVig);
     gl.uniform1f(uVig.uAspect, W / H);
@@ -1036,20 +1139,24 @@ void main(){
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
     gl.bindVertexArray(null);
+
+    // Beacon precession (cheap, after draw).
+    if (beacon) {
+      const r = rotateAround(beacon.d, beacon.axis, beacon.w * dt);
+      beacon.d[0] = r[0]; beacon.d[1] = r[1]; beacon.d[2] = r[2];
+    }
   }
 
   // ------------------------------------------------------------ Public shell
   function resize() {
     if (contextLost) return;
-    layout();
-    buildStars();
-    bakeSky();
+    layout();                 // stars + bake are viewport-independent in v2
   }
 
   function degrade() {
     if (contextLost || quality >= 3) return false;
     quality++;
-    if (quality === 1) layout();              // drop to DPR 1
+    if (quality === 1) layout();
     applyQualityCounts();
     return quality < 3;
   }
@@ -1061,8 +1168,8 @@ void main(){
   canvas.addEventListener('webglcontextrestored', () => {
     contextLost = false;
     skyTex = null; skyFbo = null;
-    vaoStars = null; bufStars = null;
-    // Stale interactions must not replay on the restored context.
+    vaoShell = null; bufShell = null;
+    vaoVol = null; bufVol = null;
     if (pulsesRef) pulsesRef.length = 0;
     wishQueue.length = 0;
     meteors.length = 0;

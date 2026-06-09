@@ -11,7 +11,7 @@
 
   const hintEl = document.getElementById('hint');
   if (hintEl && matchMedia('(pointer: coarse)').matches) {
-    hintEl.textContent = 'drift · tap to make a wish';
+    hintEl.textContent = 'swipe to look around · tap to make a wish';
   }
   let hintFadeTimer = null;
   function scheduleHintFade() {
@@ -28,6 +28,7 @@
     let slowFrameCount = 0;
     let frameEma = 16.7;            // rolling frame-time estimate
     let canDegrade = true;
+    let lastDpr = window.devicePixelRatio || 1;
 
     function glLoop(t) {
       if (!prevTimestamp) {
@@ -54,8 +55,15 @@
         }
       }
 
+      // Monitor swap can change DPR without a resize event.
+      const dprNow = window.devicePixelRatio || 1;
+      if (dprNow !== lastDpr) {
+        lastDpr = dprNow;
+        sky.resize();
+      }
+
       mouseDecay();
-      sky.frame(t, mouse, pulses);
+      sky.frame(t, mouse, pulses, look);
       requestAnimationFrame(glLoop);
     }
 
@@ -138,6 +146,7 @@
     }
 
     mouseDecay();
+    look.dx = 0; look.dy = 0;   // free-look has no 2D meaning; don't accumulate
     sfUpdate(mouse, pulses, dt);
     sfRender(ctx, t, mouse, pulses);
 

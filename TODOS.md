@@ -2,6 +2,16 @@
 
 ## Shipped
 
+### ~~3D drift + 360° free-look (Phase 1.6)~~ ✓ DONE 2026-06-09
+v2 of `scripts/starfield-gl.js`: real perspective camera floating forward through
+space. Equirect-baked galaxy sphere (seamless 3D noise — pole-clean), far celestial
+shell (~42k pts: band powder, heroes, constellation chart) + volumetric wrapped
+cube (~21k pts) for fly-through parallax. Drag = grab-the-sky free-look (full 360°
+yaw, EMA+capped fling, no phantom-fling on hold-release), pointer-events input with
+drag-vs-click disambiguation, 3D wish meteors, distant beacon, idle auto-pan,
+hover micro-look. `input.js` rewritten on pointer events (left-button-only, blur/
+context-menu recovery); 2D fallback intact.
+
 ### ~~Photoreal WebGL sky (Phase 1.5)~~ ✓ DONE 2026-06-09
 `scripts/starfield-gl.js`: WebGL2 renderer — baked Milky Way (domain-warped fbm,
 dust trunks, gold core, nebulae, star powder), ~40k blackbody-colored stars on a
