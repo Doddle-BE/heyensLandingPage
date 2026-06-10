@@ -1,7 +1,6 @@
 // Starfield — 2D graph-trace field.
 // Stars drift slowly; the cursor reveals a graph by drawing links between
 // nearby stars inside a reach radius; clicks emit expanding pulse rings.
-// See starfield/project/Starfield.html for the source design.
 
 const TAU = Math.PI * 2;
 

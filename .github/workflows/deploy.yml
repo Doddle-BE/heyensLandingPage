@@ -26,10 +26,6 @@ jobs:
             --exclude '.gitignore' \
             --exclude '.claude' \
             --exclude '.worktrees' \
-            --exclude 'PLAN.md' \
-            --exclude 'TODOS.md' \
-            --exclude 'docs/' \
-            --exclude 'deploy.sh' \
             index.html \
             styles \
             scripts \

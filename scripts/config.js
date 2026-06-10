@@ -1,4 +1,4 @@
-// Starfield tunables — see starfield/project/Starfield.html for the source design.
+// Starfield tunables (2D canvas fallback).
 // All coordinates in CSS pixel space.
 
 // Defaults mirror the design's DEFAULTS block
