@@ -9,11 +9,10 @@ single composite: scene + dual-level bloom, `1-exp(-c*E)` shoulder (E=1.65),
 vignette/grain/dither folded in. Direct path kept for no-FP16 + quality 3.
 Verified: desktop/mobile/reduced-still/no-FP16, zero fps cost at the 60 cap.
 
-## 2. Something to drift toward
-Drift has no narrative — nothing ever approaches.
-- One set piece along `driftDir`, grows over ~90s, passes by, recycles re-seeded
-- Procedural ringed gas giant billboard (limb-lit) or comet w/ real tail
-- Anticipation = floating feels like *going somewhere*.
+## 2. Something to drift toward — ✗ REMOVED 2026-06-10
+Built (procedural ringed gas giant flybys), shipped, then removed same day:
+owner verdict — no planets in this sky, ever. Keep the drift abstract.
+If "destination" ever returns, it must be non-planetary (e.g. comet, cluster).
 
 ## 3. Foreground occluders
 Parallax only between luminous layers; nothing passes in front.
