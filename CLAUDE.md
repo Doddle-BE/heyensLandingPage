@@ -11,5 +11,5 @@
 - Deploy trigger: push to main
 - Deploy status: poll production URL
 - Health check: https://heyens.be
-- Remote host: deploy (SSH alias in ~/.ssh/config)
-- Remote path: REDACTED_PATH
+- Remote host / port / user: stored in repo secrets (DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER)
+- Remote path: stored in repo secret DEPLOY_PATH
