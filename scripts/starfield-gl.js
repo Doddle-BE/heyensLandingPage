@@ -143,8 +143,9 @@ void main(){
   float dAng = asin(clamp(dot(dir, uGalN), -1.0, 1.0));
   float widthMod = 0.72 + 0.55*fbm3(dir*3.1 + 7.0);
   float sigma = 0.13*widthMod;
-  float prof = exp(-0.5*pow(dAng/sigma, 2.0));
-  float glow = exp(-0.5*pow(dAng/(sigma*2.7), 2.0));
+  float bd = dAng/sigma;                  // dAng is signed: pow(neg,2) is undefined
+  float prof = exp(-0.5*bd*bd);
+  float glow = exp(-0.5*(bd/2.7)*(bd/2.7));
 
   // Cloud structure: domain-warped fbm on the sphere.
   vec3 q = vec3(fbm3(dir*4.0), fbm3(dir*4.0+vec3(5.2,1.3,2.1)), fbm3(dir*4.0+vec3(1.7,9.2,3.8)));
@@ -153,7 +154,8 @@ void main(){
 
   // Core bulge — warm angular gaussian around uCoreDir.
   float coreA = acos(clamp(dot(dir, uCoreDir), -1.0, 1.0));
-  float core = exp(-0.5*pow(coreA/0.40, 2.0));
+  float ca = coreA/0.40;
+  float core = exp(-0.5*ca*ca);
 
   // Dust: two ridge scales gated into trunks, hugging the plane.
   float ridge  = 1.0 - abs(2.0*fbm3(dir*14.0 + 2.0*q + 11.0) - 1.0);
@@ -241,7 +243,8 @@ void main(){
     I = aIntensity*tw;
   } else {
     float dist = max(length(rel), uNearClamp);
-    I = aIntensity*uVolGain*tw / (1.0 + pow(dist/uD0, 2.0));
+    float dn = dist/uD0;
+    I = aIntensity*uVolGain*tw / (1.0 + dn*dn);
     I = min(I, 3.2);
   }
 
@@ -254,7 +257,8 @@ void main(){
     if(i>=uPulseCount) break;
     vec4 q = uPulse[i];
     float d = distance(scr, q.xy);
-    I *= 1.0 + q.w*exp(-pow((d-q.z)/46.0, 2.0));
+    float sh = (d - q.z)/46.0;            // signed inside the shell: square manually
+    I *= 1.0 + q.w*exp(-sh*sh);
   }
 
   vI = I;
@@ -288,7 +292,9 @@ void main(){
 
   // Scattered halo: angular ray lumps + radial-banded grain, growing with
   // radius so the inner glow stays clean while the rim frays organically.
-  float ang = atan(d.y, d.x);
+  // atan(0,0) is undefined (NaN on some drivers) — the sprite's center pixel
+  // can land exactly on d=(0,0). fray is 0 there, so a fixed angle is invisible.
+  float ang = (r > 0.0015) ? atan(d.y, d.x) : 0.0;
   float rayA = sin(ang*7.0 + vSeed*4.0)*sin(ang*11.0 - vSeed*2.0);
   float rayB = sin(ang*4.0 + vSeed*9.0);
   float rays = 0.42 + 0.58*(0.5 + 0.5*rayA) + 0.30*max(0.0, rayB);
@@ -303,8 +309,9 @@ void main(){
   float spike = 0.0;
   if (vSpike > 0.5) {
     float th = 0.80*uDpr;
-    float sx = exp(-pow(d.y*vSize/th, 2.0))*pow(max(0.0, 1.0-abs(d.x)*2.0), 2.4);
-    float sy = exp(-pow(d.x*vSize/th, 2.0))*pow(max(0.0, 1.0-abs(d.y)*2.0), 2.4);
+    float gx = d.y*vSize/th, gy = d.x*vSize/th;   // pow(neg, 2.0) is undefined: square manually
+    float sx = exp(-gx*gx)*pow(max(0.0, 1.0-abs(d.x)*2.0), 2.4);
+    float sy = exp(-gy*gy)*pow(max(0.0, 1.0-abs(d.y)*2.0), 2.4);
     spike = (sx+sy)*0.16*(0.85 + 0.30*hash12(vec2(floor(ang*14.0), vSeed)));
   }
   vec3 col = core*mix(vColor, vec3(1.0), 0.58)
@@ -376,11 +383,13 @@ in vec2 vLocal; out vec4 o;
 uniform float uR, uW, uK, uExposure;
 void main(){
   float d = length(vLocal);
-  float ring = exp(-0.5*pow((d-uR)/uW, 2.0));
+  float rd = (d-uR)/uW;
+  float ring = exp(-0.5*rd*rd);
   float frontT = smoothstep(uR, uR+uW*1.6, d);
   vec3 col = mix(vec3(0.88,0.93,1.0), vec3(0.50,0.72,1.0), frontT);
   float fade = (1.0-uK)*(1.0-uK);
-  float flash = exp(-d*d/(2.0*pow(12.0+uR*0.05, 2.0)))*pow(1.0-uK, 6.0)*1.3;
+  float fw = 12.0+uR*0.05;
+  float flash = exp(-d*d/(2.0*fw*fw))*pow(1.0-uK, 6.0)*1.3;
   float a = ring*fade*0.12 + flash;
   o = vec4(col*a*uExposure, 1.0);
 }`;
@@ -393,6 +402,8 @@ uniform sampler2D uTex;
 uniform float uThresh, uKnee;
 void main(){
   vec3 c = texture(uTex, vUv).rgb;
+  // NaN scrub: one bad pixel would smear into a black box through the blur.
+  if (any(isnan(c))) c = vec3(0.0);
   float l = max(c.r, max(c.g, c.b));
   float t = max(0.0, l - uThresh);
   t = t*t / (t + uKnee + 1e-4);               // soft knee
@@ -427,6 +438,7 @@ uniform float uBloomStr, uTonemapE, uAspect, uTime, uGrainAmt, uLevelB;
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 void main(){
   vec3 c = texture(uScene, vUv).rgb;
+  if (any(isnan(c))) c = vec3(0.0);       // residual NaN safety
   vec3 bloom = texture(uBloomA, vUv).rgb * 0.65
              + texture(uBloomB, vUv).rgb * 0.45 * uLevelB;
   c += bloom * uBloomStr;
