@@ -3,11 +3,34 @@
 // COORDINATE CONTRACT: all logic in CSS pixel space; DPR is render-only.
 
 (function () {
-  // Two-layer prefers-reduced-motion guard:
-  //   CSS hides the canvas + shows the static overlay; JS returns early to avoid CPU burn.
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
   const canvas = document.getElementById('starfield');
+
+  // Reduced motion: render ONE settled GL frame (no loop, no choreography)
+  // instead of the CSS box-shadow stars. CSS overlay remains the no-GL fallback.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const still = (typeof sfglCreate === 'function') ? sfglCreate(canvas) : null;
+    if (!still || !still.renderStill) return;
+    document.body.classList.add('gl-still');
+    // Present-race workaround: a single draw right after the canvas becomes
+    // visible can land before its first composite and show black. Re-draw the
+    // identical frame (fixed internal timestamp) for a few rAF ticks, then stop.
+    let stillTicks = 0;
+    function drawStill() {
+      still.resize();
+      still.renderStill();
+      if (++stillTicks < 12) requestAnimationFrame(drawStill);
+    }
+    requestAnimationFrame(drawStill);
+    let stillResizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(stillResizeTimer);
+      stillResizeTimer = setTimeout(() => {
+        still.resize();
+        still.renderStill();
+      }, 150);
+    });
+    return;
+  }
 
   const hintEl = document.getElementById('hint');
   if (hintEl && matchMedia('(pointer: coarse)').matches) {
@@ -26,14 +49,29 @@
 
     let prevTimestamp = null;
     let slowFrameCount = 0;
-    let frameEma = 16.7;            // rolling frame-time estimate
+    let frameEma = 16.7;            // rolling rendered-frame-time estimate
     let canDegrade = true;
     let lastDpr = window.devicePixelRatio || 1;
 
+    // Frame cap: 60fps active (120Hz+ buys heat, not beauty), 30fps when the
+    // page is visible but nobody is interacting with an unfocused window.
+    const FRAME_MS_ACTIVE = 1000 / 60;
+    const FRAME_MS_BG = 1000 / 30;
+    let lastRender = 0;
+    let lastInputMs = performance.now();
+    for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown']) {
+      window.addEventListener(ev, () => { lastInputMs = performance.now(); }, { passive: true });
+    }
+
     function glLoop(t) {
+      requestAnimationFrame(glLoop);
+      const focused = document.hasFocus() || performance.now() - lastInputMs < 10000;
+      const targetMs = focused ? FRAME_MS_ACTIVE : FRAME_MS_BG;
+      if (t - lastRender < targetMs - 1) return;
+      lastRender = Math.max(lastRender + targetMs, t - targetMs);   // accumulate, clamp catch-up
+
       if (!prevTimestamp) {
         prevTimestamp = t;
-        requestAnimationFrame(glLoop);
         return;
       }
       const dt = t - prevTimestamp;
@@ -64,11 +102,13 @@
 
       mouseDecay();
       sky.frame(t, mouse, pulses, look);
-      requestAnimationFrame(glLoop);
     }
 
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) prevTimestamp = null;
+      if (!document.hidden) {
+        prevTimestamp = null;
+        lastRender = 0;             // render immediately on return
+      }
     });
 
     let resizeTimer = null;
@@ -146,7 +186,7 @@
     }
 
     mouseDecay();
-    look.dx = 0; look.dy = 0;   // free-look has no 2D meaning; don't accumulate
+    look.dx = 0; look.dy = 0; look.zoom = 0; look.pinch = 1;   // free-look has no 2D meaning
     sfUpdate(mouse, pulses, dt);
     sfRender(ctx, t, mouse, pulses);
 

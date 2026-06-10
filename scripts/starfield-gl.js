@@ -48,6 +48,8 @@ function sfglCreate(canvas) {
     IDLE_YAW_RATE: 0.022,         // rad/s auto-pan when idle
     IDLE_AFTER: 5000,             // ms without drag before auto-pan resumes
     HOVER_LOOK: 0.030,            // rad micro-look toward cursor
+    ZOOM_MIN: 0.40,               // fovScale floor — ~28° telescope
+    ZOOM_MAX: 1.20,               // fovScale ceiling — ~80° wide
     // Choreography
     EXPOSURE_S: 1.4,
     SETTLE_S: 4.5,                // FOV + speed ramp
@@ -67,6 +69,11 @@ function sfglCreate(canvas) {
     BAKE_W: 2048,
     BAKE_H: 1024,
     R_FAR: 4000,                  // far-shell radius (beyond any volumetric star)
+    // Bloom (ROADMAP #1) — only when FP16 render targets are available.
+    BLOOM_THRESH: 0.55,           // luminance where glow starts
+    BLOOM_KNEE: 0.45,             // soft-knee width below the threshold
+    BLOOM_STR: 0.70,              // bloom energy added in composite
+    TONEMAP_E: 1.65,              // filmic shoulder: 1 - exp(-c*E)
   };
 
   // ---------------------------------------------------------------- GL setup
@@ -75,6 +82,13 @@ function sfglCreate(canvas) {
     powerPreference: 'high-performance',
   });
   if (!gl) return null;
+
+  // Capability probe — bloom (ROADMAP #1) needs renderable+filterable FP16.
+  // WebGL2 makes RGBA16F filterable by default; renderability needs the ext.
+  const caps = {
+    halfFloatRenderable: !!(gl.getExtension('EXT_color_buffer_half_float') ||
+                            gl.getExtension('EXT_color_buffer_float')),
+  };
 
   // ------------------------------------------------------------- GLSL source
   const VS_FULL = `#version 300 es
@@ -196,7 +210,7 @@ uniform float uShell;                    // 1 = far shell (no wrap, no falloff)
 uniform float uWrap, uD0, uVolGain, uNearClamp;
 uniform vec4 uPulse[6];
 uniform int uPulseCount;
-out vec3 vColor; out float vI; out float vSize; out float vSpike;
+out vec3 vColor; out float vI; out float vSize; out float vSpike; out float vSeed;
 void main(){
   vec3 rel;
   if (uShell > 0.5) {
@@ -210,7 +224,7 @@ void main(){
   if (view.z > -2.0) {                   // behind the camera
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     gl_PointSize = 0.0;
-    vI = 0.0; vColor = vec3(0.0); vSize = 1.0; vSpike = 0.0;
+    vI = 0.0; vColor = vec3(0.0); vSize = 1.0; vSpike = 0.0; vSeed = 0.0;
     return;
   }
   float invZ = -1.0/view.z;
@@ -246,6 +260,7 @@ void main(){
   vI = I;
   vColor = aColor;
   vSpike = step(0.85, aIntensity)*step(0.5, uShell);
+  vSeed = aTwk.y;                       // per-star random phase doubles as PSF seed
   float size = (1.6 + 6.8*sqrt(min(I, 3.2)))*uDpr*(1.0 + 0.10*(tw-1.0));
   if (uShell > 0.5 && aIntensity > 0.85) size = max(size, (17.0 + 11.0*aIntensity)*uDpr);
   size = min(size, uMaxPt);
@@ -255,26 +270,47 @@ void main(){
 
   const FS_STARS = `#version 300 es
 precision highp float;
-in vec3 vColor; in float vI; in float vSize; in float vSpike;
+in vec3 vColor; in float vI; in float vSize; in float vSpike; in float vSeed;
 uniform float uDpr, uExposure;
 out vec4 o;
+float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 void main(){
   vec2 d = gl_PointCoord - 0.5;
-  float rp = length(d)*vSize;                 // radius in device px
+  // Per-star anisotropy: real scattered light is never a perfect disc.
+  vec2 da = d*vec2(1.0 + 0.16*sin(vSeed*3.1), 1.0 + 0.16*cos(vSeed*2.3));
+  float r = length(d);
+  float ra = length(da);
+  // Radial window: every term must reach zero before the sprite quad rim.
+  float edge = 1.0 - smoothstep(0.34, 0.47, ra);
+  float rp = r*vSize;                         // radius in device px
   float sig = (0.55 + 0.50*sqrt(min(vI,2.2)))*uDpr;
   float core = exp(-rp*rp/(2.0*sig*sig));
-  float halo = exp(-rp/(vSize*0.22))*0.13;
+
+  // Scattered halo: angular ray lumps + radial-banded grain, growing with
+  // radius so the inner glow stays clean while the rim frays organically.
+  float ang = atan(d.y, d.x);
+  float rayA = sin(ang*7.0 + vSeed*4.0)*sin(ang*11.0 - vSeed*2.0);
+  float rayB = sin(ang*4.0 + vSeed*9.0);
+  float rays = 0.42 + 0.58*(0.5 + 0.5*rayA) + 0.30*max(0.0, rayB);
+  float fray = smoothstep(0.05, 0.30, ra);
+  float grain = 0.80 + 0.40*hash12(vec2(floor(ang*22.0 + vSeed*5.0), floor(ra*36.0)));
+  float halo = exp(-ra/0.20)*0.15
+             * mix(1.0, rays*0.82, fray)
+             * mix(1.0, grain, smoothstep(0.10, 0.32, ra));
+  // Outer scatter drifts warm — dust does that to starlight.
+  vec3 haloCol = mix(vColor, vColor*vec3(1.10,0.96,0.84), smoothstep(0.08, 0.34, ra));
+
   float spike = 0.0;
   if (vSpike > 0.5) {
     float th = 0.80*uDpr;
     float sx = exp(-pow(d.y*vSize/th, 2.0))*pow(max(0.0, 1.0-abs(d.x)*2.0), 2.4);
     float sy = exp(-pow(d.x*vSize/th, 2.0))*pow(max(0.0, 1.0-abs(d.y)*2.0), 2.4);
-    spike = (sx+sy)*0.16;
+    spike = (sx+sy)*0.16*(0.85 + 0.30*hash12(vec2(floor(ang*14.0), vSeed)));
   }
   vec3 col = core*mix(vColor, vec3(1.0), 0.58)
-           + halo*vColor
+           + halo*haloCol
            + spike*mix(vColor, vec3(1.0), 0.5);
-  o = vec4(col*vI*uExposure, 1.0);
+  o = vec4(col*vI*uExposure*edge, 1.0);
 }`;
 
   const VS_LINES = `#version 300 es
@@ -347,6 +383,61 @@ void main(){
   float flash = exp(-d*d/(2.0*pow(12.0+uR*0.05, 2.0)))*pow(1.0-uK, 6.0)*1.3;
   float a = ring*fade*0.12 + flash;
   o = vec4(col*a*uExposure, 1.0);
+}`;
+
+  // --- Bloom chain (scene FBO -> bright -> blur -> composite) -------------
+  const FS_BRIGHT = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex;
+uniform float uThresh, uKnee;
+void main(){
+  vec3 c = texture(uTex, vUv).rgb;
+  float l = max(c.r, max(c.g, c.b));
+  float t = max(0.0, l - uThresh);
+  t = t*t / (t + uKnee + 1e-4);               // soft knee
+  o = vec4(c * (t / max(l, 1e-4)), 1.0);
+}`;
+
+  const FS_BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex;
+uniform vec2 uDir;                             // texel-scaled blur direction
+void main(){
+  vec3 s = texture(uTex, vUv).rgb * 0.227027;
+  s += texture(uTex, vUv + uDir*1.0).rgb * 0.1945946;
+  s += texture(uTex, vUv - uDir*1.0).rgb * 0.1945946;
+  s += texture(uTex, vUv + uDir*2.0).rgb * 0.1216216;
+  s += texture(uTex, vUv - uDir*2.0).rgb * 0.1216216;
+  s += texture(uTex, vUv + uDir*3.0).rgb * 0.054054;
+  s += texture(uTex, vUv - uDir*3.0).rgb * 0.054054;
+  s += texture(uTex, vUv + uDir*4.0).rgb * 0.016216;
+  s += texture(uTex, vUv - uDir*4.0).rgb * 0.016216;
+  o = vec4(s, 1.0);
+}`;
+
+  // Scene + dual-level bloom -> filmic shoulder; vignette/grain/dither folded in.
+  const FS_COMPOSITE = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uScene, uBloomA, uBloomB;
+uniform vec2 uRes;
+uniform float uBloomStr, uTonemapE, uAspect, uTime, uGrainAmt, uLevelB;
+float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+void main(){
+  vec3 c = texture(uScene, vUv).rgb;
+  vec3 bloom = texture(uBloomA, vUv).rgb * 0.65
+             + texture(uBloomB, vUv).rgb * 0.45 * uLevelB;
+  c += bloom * uBloomStr;
+  c = 1.0 - exp(-c * uTonemapE);               // filmic-ish shoulder
+  vec2 p = (vUv-0.5)*vec2(uAspect,1.0);
+  float d = length(p)/0.72;
+  c *= 1.0 - smoothstep(0.62, 1.18, d)*0.40;   // vignette (matches direct path)
+  float n = hash12(vUv*uRes + fract(uTime*0.731)*913.7);
+  c += vec3(max(0.0, n-0.55)*uGrainAmt);       // sensor grain
+  c += (hash12(vUv*uRes+17.7)-0.5)*(1.5/255.0); // output dither
+  o = vec4(c, 1.0);
 }`;
 
   const FS_VIGNETTE = `#version 300 es
@@ -474,10 +565,14 @@ void main(){
 
   // --------------------------------------------------------------- Programs
   let progBake, progBg, progStars, progLines, progStreak, progRing, progVig, progGrain;
+  let progBright, progBlur, progComposite;
   let uBake, uBg, uStars, uLines, uStreak, uRing, uVig, uGrain;
+  let uBright, uBlur, uComposite;
   let vaoFull, vaoShell, vaoVol, vaoLines, vaoStreak, vaoRing;
   let bufFull, bufShell, bufVol, bufLines, bufStreak, bufRing;
   let skyTex = null, skyFbo = null;
+  // Bloom render targets: full-res FP16 scene + half/quarter ping-pongs.
+  let sceneT = null, halfA = null, halfB = null, quartA = null, quartB = null;
   let maxPointSize = 64;
 
   // ------------------------------------------------------------------ State
@@ -495,6 +590,7 @@ void main(){
   // Camera
   let yaw = -0.614, pitch = 0.162;               // opening: core low-left, band sweeps up-right
   let yawVel = 0, pitchVel = 0;
+  let fovScale = 1, fovTarget = 1;               // telescope zoom (smoothed)
   let camPos = [0, 0, 0];
   const driftDir = norm3(CFG.DRIFT_DIR);
   let lastInputAt = 0;            // idle pan eases in IDLE_AFTER ms after load
@@ -543,6 +639,15 @@ void main(){
     uVig = uniforms(progVig, ['uAspect']);
     progGrain = program(VS_FULL, FS_GRAIN);
     uGrain = uniforms(progGrain, ['uRes', 'uTime']);
+    if (caps.halfFloatRenderable) {
+      progBright = program(VS_FULL, FS_BRIGHT);
+      uBright = uniforms(progBright, ['uTex', 'uThresh', 'uKnee']);
+      progBlur = program(VS_FULL, FS_BLUR);
+      uBlur = uniforms(progBlur, ['uTex', 'uDir']);
+      progComposite = program(VS_FULL, FS_COMPOSITE);
+      uComposite = uniforms(progComposite, ['uScene', 'uBloomA', 'uBloomB', 'uRes',
+        'uBloomStr', 'uTonemapE', 'uAspect', 'uTime', 'uGrainAmt', 'uLevelB']);
+    }
 
     const range = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
     maxPointSize = Math.min(range[1] || 64, 128);
@@ -720,6 +825,40 @@ void main(){
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  function makeTarget(w, h) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { fbo, tex, w, h };
+  }
+  function dropTarget(t) {
+    if (!t) return null;
+    gl.deleteTexture(t.tex);
+    gl.deleteFramebuffer(t.fbo);
+    return null;
+  }
+  function allocTargets() {
+    sceneT = dropTarget(sceneT); halfA = dropTarget(halfA); halfB = dropTarget(halfB);
+    quartA = dropTarget(quartA); quartB = dropTarget(quartB);
+    if (!caps.halfFloatRenderable) return;
+    const w = canvas.width, h = canvas.height;
+    const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1);
+    const qw = Math.max(1, w >> 2), qh = Math.max(1, h >> 2);
+    sceneT = makeTarget(w, h);
+    halfA = makeTarget(hw, hh);
+    halfB = makeTarget(hw, hh);
+    quartA = makeTarget(qw, qh);
+    quartB = makeTarget(qw, qh);
+  }
+
   function layout() {
     DPR = Math.min(window.devicePixelRatio || 1, CFG.DPR_MAX);
     if (quality >= 1) DPR = 1;
@@ -727,6 +866,7 @@ void main(){
     H = canvas.clientHeight || window.innerHeight;
     canvas.width = Math.max(1, Math.round(W * DPR));
     canvas.height = Math.max(1, Math.round(H * DPR));
+    allocTargets();
   }
 
   function applyQualityCounts() {
@@ -934,6 +1074,15 @@ void main(){
   }
 
   // ------------------------------------------------------------------ Frame
+  // One separable blur step: src -> dst along (dx, dy) in dst texel units.
+  function blurPass(src, dst, dx, dy) {
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.viewport(0, 0, dst.w, dst.h);
+    gl.uniform2f(uBlur.uDir, dx / dst.w, dy / dst.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
   function frame(tMs, mouse, pulses, look) {
     pulsesRef = pulses;
     if (contextLost) return;
@@ -948,11 +1097,25 @@ void main(){
     const exposure = Math.min(1, now / 1000 / CFG.EXPOSURE_S);
     const exp2 = exposure * exposure * (3 - 2 * exposure);
     const settle = easeOutCubic(Math.min(1, now / 1000 / CFG.SETTLE_S));
-    const fov = CFG.FOV_SETTLE + (CFG.FOV_Y - CFG.FOV_SETTLE) * settle;
-    const tanHalf = Math.tan(fov / 2);
+    const fovBase = CFG.FOV_SETTLE + (CFG.FOV_Y - CFG.FOV_SETTLE) * settle;
+    // Telescope zoom: wheel / pinch drive a smoothed FOV scale.
+    if (look.zoom !== 0) {
+      fovTarget *= Math.exp(look.zoom * 0.0011);
+      look.zoom = 0;
+      lastInputAt = now;
+    }
+    if (look.pinch !== 1) {
+      fovTarget /= look.pinch;
+      look.pinch = 1;
+      lastInputAt = now;
+    }
+    fovTarget = Math.max(CFG.ZOOM_MIN, Math.min(CFG.ZOOM_MAX, fovTarget));
+    fovScale += (fovTarget - fovScale) * (1 - Math.exp(-dt * 8));
+    const tanHalf = Math.tan(fovBase / 2) * fovScale;
 
     // --- Camera: drag (grab the sky) + fling inertia + idle auto-pan.
-    const sens = (look.pointerType === 'touch' ? CFG.DRAG_SENS_TOUCH : CFG.DRAG_SENS);
+    // Sensitivity tracks zoom: telescope mode gets proportionally finer control.
+    const sens = (look.pointerType === 'touch' ? CFG.DRAG_SENS_TOUCH : CFG.DRAG_SENS) * fovScale;
     if (look.dx !== 0 || look.dy !== 0) {
       yaw += look.dx * sens;
       pitch += look.dy * sens;
@@ -1036,7 +1199,11 @@ void main(){
       pulseUni[i * 4 + 3] = 1.4 * (1 - kk);
     }
 
+    // HDR path: render the scene into the FP16 target, glow + tonemap after.
+    const bloomOn = !!sceneT && quality < 3;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomOn ? sceneT.fbo : null);
     gl.viewport(0, 0, canvas.width, canvas.height);
+    if (bloomOn) gl.clear(gl.COLOR_BUFFER_BIT);
 
     // 1 — sky sphere.
     gl.disable(gl.BLEND);
@@ -1125,18 +1292,72 @@ void main(){
       }
     }
 
-    // 6 — vignette, then grain.
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.useProgram(progVig);
-    gl.uniform1f(uVig.uAspect, W / H);
-    gl.bindVertexArray(vaoFull);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (grainOn) {
-      gl.blendFunc(gl.ONE, gl.ONE);
-      gl.useProgram(progGrain);
-      gl.uniform2f(uGrain.uRes, W, H);
-      gl.uniform1f(uGrain.uTime, uTime);
+    if (bloomOn) {
+      // 6 — bloom chain: bright-extract at half res, blur half + quarter.
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(vaoFull);
+      gl.useProgram(progBright);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+      gl.uniform1i(uBright.uTex, 0);
+      gl.uniform1f(uBright.uThresh, CFG.BLOOM_THRESH);
+      gl.uniform1f(uBright.uKnee, CFG.BLOOM_KNEE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, halfA.fbo);
+      gl.viewport(0, 0, halfA.w, halfA.h);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      gl.useProgram(progBlur);
+      gl.uniform1i(uBlur.uTex, 0);
+      blurPass(halfA, halfB, 1, 0);
+      blurPass(halfB, halfA, 0, 1);
+      const levelB = quality < 2 ? 1 : 0;
+      if (levelB) {
+        // Downsample blurred half into quarter (plain blit via blur dir 0).
+        gl.bindTexture(gl.TEXTURE_2D, halfA.tex);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, quartA.fbo);
+        gl.viewport(0, 0, quartA.w, quartA.h);
+        gl.uniform2f(uBlur.uDir, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        blurPass(quartA, quartB, 1, 0);
+        blurPass(quartB, quartA, 0, 1);
+      }
+
+      // 7 — composite: scene + bloom -> tonemap, vignette, grain, dither.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(progComposite);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, halfA.tex);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, quartA.tex);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(uComposite.uScene, 0);
+      gl.uniform1i(uComposite.uBloomA, 1);
+      gl.uniform1i(uComposite.uBloomB, 2);
+      gl.uniform2f(uComposite.uRes, W, H);
+      gl.uniform1f(uComposite.uBloomStr, CFG.BLOOM_STR);
+      gl.uniform1f(uComposite.uTonemapE, CFG.TONEMAP_E);
+      gl.uniform1f(uComposite.uAspect, W / H);
+      gl.uniform1f(uComposite.uTime, uTime);
+      gl.uniform1f(uComposite.uGrainAmt, grainOn ? 0.030 : 0.0);
+      gl.uniform1f(uComposite.uLevelB, levelB);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    } else {
+      // 6 — direct path (no FP16 / minimal quality): vignette, then grain.
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(progVig);
+      gl.uniform1f(uVig.uAspect, W / H);
+      gl.bindVertexArray(vaoFull);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (grainOn) {
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.useProgram(progGrain);
+        gl.uniform2f(uGrain.uRes, W, H);
+        gl.uniform1f(uGrain.uTime, uTime);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
     }
     gl.bindVertexArray(null);
 
@@ -1151,6 +1372,23 @@ void main(){
   function resize() {
     if (contextLost) return;
     layout();                 // stars + bake are viewport-independent in v2
+  }
+
+  // One settled frame for prefers-reduced-motion: no loop, choreography done.
+  const stillMouse = { x: null, y: null, vel: 0, active: false };
+  const stillLook = { dx: 0, dy: 0, zoom: 0, pinch: 1, dragging: false, pointerType: 'mouse' };
+  const stillPulses = [];
+  function renderStill() {
+    if (contextLost) return;
+    // Synthetic timestamp, floored so startMs stays >= 0 — early in page life
+    // performance.now() < 12000 would go negative and trip frame()'s
+    // first-frame guard, resetting now to 0 (exposure 0 -> black frame).
+    const t = Math.max(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()),
+      12001);
+    startMs = t - 12000;          // 12s in: exposure, settle, drift ramp all done
+    lastMs = t - 16;
+    frame(t, stillMouse, stillPulses, stillLook);
   }
 
   function degrade() {
@@ -1168,6 +1406,7 @@ void main(){
   canvas.addEventListener('webglcontextrestored', () => {
     contextLost = false;
     skyTex = null; skyFbo = null;
+    sceneT = null; halfA = null; halfB = null; quartA = null; quartB = null;
     vaoShell = null; bufShell = null;
     vaoVol = null; bufVol = null;
     if (pulsesRef) pulsesRef.length = 0;
@@ -1187,5 +1426,5 @@ void main(){
     return null;
   }
 
-  return { frame, resize, degrade };
+  return { frame, resize, degrade, renderStill, caps };
 }

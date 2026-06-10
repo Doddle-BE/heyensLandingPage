@@ -67,6 +67,15 @@ canvas {
   .hint {
     display: none;
   }
+
+  /* JS rendered a single static GL frame — show it instead of the CSS stars. */
+  body.gl-still canvas#starfield {
+    display: block;
+  }
+
+  body.gl-still #reduced-motion-overlay {
+    display: none;
+  }
 }
 
 #reduced-motion-overlay {

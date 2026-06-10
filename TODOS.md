@@ -20,6 +20,9 @@ wish-on-click, satellite, supernova shockwave, constellation chart near cursor,
 vignette+grain. GL-first in `main.js`; old 2D field kept as fallback. Sky is
 session-seeded (stable across resize). Quality ladder: DPR → star count → extras.
 
+> Visual/feel upgrade backlog (bloom, destination set piece, occluders, streaking,
+> landmarks, sound, star-nav): see [ROADMAP.md](ROADMAP.md).
+
 ## P1 — High Priority
 
 ### Content overlay layer (Phase 2)

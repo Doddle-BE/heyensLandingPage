@@ -16,6 +16,8 @@ const pulses = [];
 const look = {
   dx: 0,            // accumulated drag deltas, consumed each GL frame
   dy: 0,
+  zoom: 0,          // accumulated wheel px (+away/-toward), consumed each GL frame
+  pinch: 1,         // accumulated pinch scale factor, consumed each GL frame
   dragging: false,
   pointerType: 'mouse',
 };
@@ -33,9 +35,30 @@ function inputBind(onFirstMove) {
   let downT = 0;
   let lastX = 0, lastY = 0;
 
+  // Two-finger pinch (touch): track every touch pointer, not just the primary.
+  const touches = new Map();      // pointerId -> {x, y}
+  let pinching = false;
+  let pinchDist = 0;
+  function touchDist() {
+    const [a, b] = [...touches.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
   window.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') {
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) {
+        // Second finger: drag becomes pinch; suppress click + look deltas.
+        pinching = true;
+        pinchDist = touchDist();
+        down = false;
+        look.dragging = false;
+        document.body.classList.remove('grabbing');
+      }
+    }
     if (!e.isPrimary) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;   // left button only
+    if (pinching) return;
     down = true;
     moved = 0;
     downT = performance.now();
@@ -49,6 +72,15 @@ function inputBind(onFirstMove) {
   });
 
   window.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch' && touches.has(e.pointerId)) {
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinching && touches.size >= 2) {
+        const d = touchDist();
+        if (pinchDist > 0 && d > 0) look.pinch *= d / pinchDist;
+        pinchDist = d;
+        return;                   // pinch owns the gesture
+      }
+    }
     if (!e.isPrimary) return;
     if (mouse.x !== null) {
       const dx = e.clientX - mouse.x;
@@ -97,13 +129,25 @@ function inputBind(onFirstMove) {
     }
   }
 
+  function touchLift(e) {
+    if (e.pointerType !== 'touch') return;
+    touches.delete(e.pointerId);
+    if (pinching && touches.size < 2) {
+      pinching = false;
+      pinchDist = 0;
+      // Remaining finger must re-touch to drag; prevents a delta jump.
+    }
+  }
+
   window.addEventListener('pointerup', (e) => {
+    touchLift(e);
     if (!e.isPrimary) return;
     endPress(e, false);
     if (look.pointerType === 'touch') mouse.active = false;
   });
 
   window.addEventListener('pointercancel', (e) => {
+    touchLift(e);
     if (!e.isPrimary) return;
     endPress(e, true);
     if (look.pointerType === 'touch') mouse.active = false;
@@ -114,11 +158,20 @@ function inputBind(onFirstMove) {
     if (!e.relatedTarget && e.pointerType !== 'touch') mouse.active = false;
   });
 
+  // Telescope zoom: wheel (incl. trackpad pinch, which arrives as ctrl+wheel).
+  window.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    look.zoom += Math.max(-180, Math.min(180, dy)) * (e.ctrlKey ? 3 : 1);
+  }, { passive: false });
+
   // Lost focus mid-drag (alt-tab etc.) — never leave a stuck drag.
   window.addEventListener('blur', () => {
     down = false;
     look.dragging = false;
     mouse.active = false;
+    pinching = false;
+    touches.clear();
     document.body.classList.remove('grabbing');
   });
 }
