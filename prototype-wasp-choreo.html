@@ -1,0 +1,303 @@
+<!doctype html>
+<!-- PROTOTYPE — THROWAWAY. Choreography sketch for ticket #8: wasps in and out
+     of their nest. Persistent roaming swarm around the nest + periodic full
+     in/out crossings (Kelber-rate) + occasional landings + entrance orbits.
+     Reynolds steering (arrive/wander/separation), daylight art (#3),
+     avoid+scatter interaction (#5), pointer parallax. Live panel + presets +
+     "Log params". Standalone: NOT in deploy.yml. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>wasp choreography prototype</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe9f2; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .hint { position: fixed; left: 50%; top: 22px; transform: translateX(-50%);
+    font: 14px/1.4 system-ui, sans-serif; letter-spacing: .1em; color: rgba(40,34,26,.7); pointer-events: none; }
+  #panel { position: fixed; top: 12px; right: 12px; width: 236px;
+    background: rgba(20,22,28,.86); color: #eee; border-radius: 10px; padding: 10px 12px;
+    font: 11px/1.5 system-ui, sans-serif; box-shadow: 0 6px 22px rgba(0,0,0,.4); z-index: 10; user-select: none; }
+  #panel h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; opacity: .7; text-transform: uppercase; }
+  #panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 3px 0; }
+  #panel label > span:last-child { font-variant-numeric: tabular-nums; opacity: .8; min-width: 40px; text-align: right; }
+  #panel input[type=range] { width: 108px; }
+  #panel .row { display: flex; gap: 6px; margin-top: 8px; }
+  #panel button { flex: 1; background: #3a3f4b; color: #fff; border: 0; border-radius: 6px; padding: 5px 0; font: 11px system-ui; cursor: pointer; }
+  #panel button:hover { background: #4a5060; }
+  #dump { position: fixed; left: 12px; bottom: 12px; max-width: 46vw; background: rgba(20,22,28,.9);
+    color: #b6f09a; border-radius: 8px; padding: 8px 10px; font: 11px/1.4 ui-monospace, monospace; white-space: pre-wrap; display: none; z-index: 10; }
+  #stat { position: fixed; left: 12px; top: 12px; color: rgba(40,34,26,.55); font: 11px/1.4 ui-monospace, monospace; z-index: 10; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">move to part the swarm · click to scatter them · panel top-right</div>
+<div id="stat"></div>
+<div id="panel"></div>
+<pre id="dump"></pre>
+<script>
+'use strict';
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  computeNest();
+}
+// ------------------------------------------------------------ tunable params
+const P = {
+  population:   22,    // persistent airborne swarm target
+  crossingsMin: 10,    // full in/out crossings per minute (Kelber baseline ~3)
+  roamRadius:  260,    // px spread of the roaming swarm around the nest
+  cruiseOut:   340,    // px/s outbound transit
+  cruiseIn:    260,    // px/s inbound transit
+  roamSpeed:   150,    // px/s wandering near the nest
+  orbitAngVel: 150,    // deg/s entrance arc (Zeil 100-200)
+  orbitRadius:  60,    // px arc radius at entrance
+  eventRate:   0.35,   // Hz: how often a roamer dips to orbit/land
+  landChance:  0.30,   // of those events, fraction that land vs orbit
+  hoverHold:   0.9,    // s idle on the nest surface
+  wanderAmp:    18,    // deg heading noise
+  sepRadius:    26,    // px separation
+  cursorAvoid: 130,    // px avoidance radius (0 = off)
+  parallax:     14,    // px scene parallax
+};
+const SEPW = 1.1, AVOIDW = 2.4, WRATE = 0.9;
+const PRESETS = {
+  Calm:   { population: 14, crossingsMin: 5,  roamRadius: 220, cruiseOut: 300, roamSpeed: 120, orbitAngVel: 125, wanderAmp: 13, eventRate: 0.25 },
+  Busy:   { population: 34, crossingsMin: 20, roamRadius: 320, cruiseOut: 400, roamSpeed: 180, orbitAngVel: 175, wanderAmp: 22, eventRate: 0.5 },
+  Sparse: { population: 8,  crossingsMin: 4,  roamRadius: 200, cruiseOut: 320, roamSpeed: 130, orbitAngVel: 140, wanderAmp: 14, eventRate: 0.2 },
+};
+
+// ------------------------------------------------------------ nest geometry
+const nest = { x: 0, y: 0, r: 0, entry: { x: 0, y: 0 } };
+function computeNest() {
+  nest.x = W * 0.22; nest.y = H * 0.20;
+  nest.r = Math.max(46, Math.min(W, H) * 0.075);
+  nest.entry = { x: nest.x, y: nest.y + nest.r * 0.92 };
+}
+
+// ------------------------------------------------------------ vec helpers
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+const len = (v) => Math.hypot(v.x, v.y);
+const norm = (v) => { const l = len(v) || 1; return { x: v.x / l, y: v.y / l }; };
+function clampMag(v, m) { const l = len(v); if (l > m && l > 0) { v.x = v.x / l * m; v.y = v.y / l * m; } }
+
+// ------------------------------------------------------------ agents
+const wasps = [];
+const pulses = [];
+const mouse = { x: null, y: null, active: false };
+const MAXF = 1600;
+let arrivals = 0, departures = 0;
+
+function edgePoint() {
+  const s = Math.floor(Math.random() * 4), m = 60;
+  if (s === 0) return { x: Math.random() * W, y: -m };
+  if (s === 1) return { x: W + m, y: Math.random() * H };
+  if (s === 2) return { x: Math.random() * W, y: H + m };
+  return { x: -m, y: Math.random() * H };
+}
+function newRoamTarget() {
+  const a = Math.random() * 6.28, r = Math.random() * P.roamRadius;
+  return { x: nest.x + Math.cos(a) * r, y: nest.y + Math.sin(a) * r * 0.8 };
+}
+function mkWasp(o) {
+  return Object.assign({ x: 0, y: 0, vx: 0, vy: 0, state: 'roam', t: Math.random() * 9,
+    phase: Math.random() * 1000, wing: Math.random() * 6, tgt: newRoamTarget(),
+    orbitA: 0, orbitLeft: 0, evt: 0, hold: 0, dir: Math.random() < 0.5 ? 1 : -1 }, o);
+}
+function spawnInbound() { const p = edgePoint(); wasps.push(mkWasp({ x: p.x, y: p.y, state: 'inbound' })); }
+function seedSwarm() {
+  wasps.length = 0;
+  const n = Math.round(P.population);
+  for (let i = 0; i < n; i++) { const t = newRoamTarget(); wasps.push(mkWasp({ x: t.x, y: t.y, state: 'roam' })); }
+}
+
+// steering
+function arrive(w, target, speed, F, slow) {
+  const to = sub(target, w), d = len(to); slow = slow || P.roamRadius * 0.25;
+  const s = d < slow ? speed * (d / slow) : speed; const n = norm(to);
+  F.x += n.x * s - w.vx; F.y += n.y * s - w.vy;
+}
+function wander(w, F, mag) {
+  const n = Math.sin(w.t * WRATE * 6.28 + w.phase) + 0.5 * Math.sin(w.t * WRATE * 12.9 + w.phase * 1.7);
+  const ang = Math.atan2(w.vy, w.vx) + n * P.wanderAmp * Math.PI / 180;
+  F.x += Math.cos(ang) * mag; F.y += Math.sin(ang) * mag;
+}
+function separate(w, F) {
+  let sx = 0, sy = 0, n = 0;
+  for (const o of wasps) { if (o === w) continue; const dx = w.x - o.x, dy = w.y - o.y, d = Math.hypot(dx, dy);
+    if (d > 0 && d < P.sepRadius) { sx += dx / d; sy += dy / d; n++; } }
+  if (n) { F.x += sx / n * SEPW * 300; F.y += sy / n * SEPW * 300; }
+}
+function avoidCursor(w, F) {
+  if (!P.cursorAvoid || !mouse.active || mouse.x == null) return;
+  const dx = w.x - mouse.x, dy = w.y - mouse.y, d = Math.hypot(dx, dy);
+  if (d > 0 && d < P.cursorAvoid) { const f = (1 - d / P.cursorAvoid) * AVOIDW * 900; F.x += dx / d * f; F.y += dy / d * f; }
+}
+function pulseScatter(w, F) {
+  for (const p of pulses) { const dx = w.x - p.x, dy = w.y - p.y, d = Math.hypot(dx, dy); const R = 40 + p.age * 540;
+    if (d > 0 && d < R && d > R - 100) { const f = 1300 * (1 - p.age); F.x += dx / d * f; F.y += dy / d * f; } }
+}
+function surfacePoint() { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2; return { x: nest.x + Math.cos(a) * nest.r * 0.7, y: nest.y + Math.sin(a) * nest.r * 0.75 }; }
+
+function step(w, dt) {
+  w.t += dt; w.wing += dt * 80;
+  const F = { x: 0, y: 0 }; let maxSpeed = P.roamSpeed;
+
+  if (w.state === 'inbound') {
+    arrive(w, nest, P.cruiseIn, F, P.arriveRadius || 46); wander(w, F, 220); maxSpeed = P.cruiseIn;
+    if (len(sub(w, nest)) < P.roamRadius * 0.7) { w.state = 'roam'; w.tgt = newRoamTarget(); arrivals++; }
+  } else if (w.state === 'roam') {
+    arrive(w, w.tgt, P.roamSpeed, F); wander(w, F, 260); maxSpeed = P.roamSpeed;
+    if (len(sub(w, w.tgt)) < 34) w.tgt = newRoamTarget();
+    if (len(sub(w, nest)) > P.roamRadius * 1.15) { const back = norm(sub(nest, w)); F.x += back.x * 400; F.y += back.y * 400; }
+    w.evt += dt;
+    if (w.evt > 1 / Math.max(0.05, P.eventRate) * (0.5 + Math.random())) {
+      w.evt = 0;
+      if (Math.random() < P.landChance) { w.state = 'land'; w.tgt = surfacePoint(); }
+      else { w.state = 'orbit'; w.orbitA = Math.atan2(w.y - nest.entry.y, w.x - nest.entry.x); w.orbitLeft = 1 + Math.random() * 2; }
+    }
+  } else if (w.state === 'orbit') {
+    const av = P.orbitAngVel * Math.PI / 180 * w.dir; w.orbitA += av * dt; w.orbitLeft -= Math.abs(av * dt) / 6.28;
+    const t = { x: nest.entry.x + Math.cos(w.orbitA) * P.orbitRadius, y: nest.entry.y + Math.sin(w.orbitA) * P.orbitRadius };
+    arrive(w, t, P.orbitAngVel * Math.PI / 180 * P.orbitRadius, F, 30);
+    maxSpeed = P.orbitAngVel * Math.PI / 180 * P.orbitRadius * 1.4;
+    if (w.orbitLeft <= 0) { w.state = 'roam'; w.tgt = newRoamTarget(); }
+  } else if (w.state === 'land') {
+    arrive(w, w.tgt, P.roamSpeed * 0.7, F, 40); maxSpeed = P.roamSpeed * 0.8;
+    if (len(sub(w, w.tgt)) < 8) { w.state = 'hold'; w.hold = P.hoverHold; }
+  } else if (w.state === 'hold') {
+    w.vx *= 0.5; w.vy *= 0.5; w.hold -= dt; if (w.hold <= 0) { w.state = 'roam'; w.tgt = newRoamTarget(); }
+  } else if (w.state === 'launch') {
+    const out = { x: nest.entry.x + w.dir * 80, y: nest.entry.y + 140 }; arrive(w, out, P.cruiseOut, F, 60); maxSpeed = P.cruiseOut;
+    if (len(sub(w, nest.entry)) > 150) { w.state = 'outbound'; w.tgt = edgePoint(); }
+  } else if (w.state === 'outbound') {
+    arrive(w, w.tgt, P.cruiseOut, F, 80); wander(w, F, 220); maxSpeed = P.cruiseOut;
+    if (w.x < -60 || w.x > W + 60 || w.y < -60 || w.y > H + 60) { w.dead = true; departures++; }
+  }
+
+  separate(w, F); avoidCursor(w, F); pulseScatter(w, F);
+  clampMag(F, MAXF);
+  w.vx += F.x * dt; w.vy += F.y * dt;
+  const sp = Math.hypot(w.vx, w.vy); if (sp > maxSpeed * 1.7) { w.vx *= maxSpeed * 1.7 / sp; w.vy *= maxSpeed * 1.7 / sp; }
+  w.x += w.vx * dt; w.y += w.vy * dt;
+}
+
+// ------------------------------------------------------------ scheduler
+let topup = 0, cross = 0;
+function schedule(dt) {
+  // maintain the persistent swarm toward target population
+  topup += dt;
+  if (topup > 0.4) { topup = 0; if (wasps.length < P.population) spawnInbound(); }
+  // periodic full in/out crossings: send a roamer out (backfilled by top-up)
+  cross += dt; const interval = 60 / Math.max(1, P.crossingsMin);
+  while (cross >= interval) {
+    cross -= interval;
+    const cand = wasps.filter(w => w.state === 'roam' || w.state === 'orbit');
+    if (cand.length > 3) cand[Math.floor(Math.random() * cand.length)].state = 'launch';
+  }
+}
+
+// ------------------------------------------------------------ drawing
+function drawNest(ox, oy) {
+  ctx.save(); ctx.translate(nest.x + ox, nest.y + oy);
+  ctx.fillStyle = '#5c5148';
+  ctx.beginPath(); ctx.moveTo(-nest.x - ox, -nest.y - oy); ctx.lineTo(W * 0.42 - nest.x, -nest.y - oy);
+  ctx.lineTo(W * 0.34 - nest.x, 44 - nest.y); ctx.lineTo(-nest.x - ox, 60 - nest.y); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#6e6459'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(0, -nest.r - 30); ctx.lineTo(0, -nest.r * 0.7); ctx.stroke();
+  for (let i = 4; i >= 0; i--) { const r = nest.r * (0.55 + i * 0.11), c = 188 - i * 14;
+    ctx.fillStyle = `rgb(${c},${c - 8},${c - 22})`; ctx.beginPath(); ctx.ellipse(0, i * 3, r, r * 1.08, 0, 0, 6.28); ctx.fill(); }
+  ctx.strokeStyle = 'rgba(90,80,70,.3)'; ctx.lineWidth = 1.3;
+  for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.ellipse(0, i * 6 - 8, nest.r * 0.5 + i * 8, nest.r * 0.2 + i * 4, 0, .4, 2.74); ctx.stroke(); }
+  ctx.fillStyle = '#241a12'; ctx.beginPath(); ctx.ellipse(0, nest.r * 0.92, 11, 9, 0, 0, 6.28); ctx.fill();
+  ctx.restore();
+}
+function drawWasp(w) {
+  ctx.save(); ctx.translate(w.x, w.y); ctx.rotate(Math.atan2(w.vy, w.vx)); ctx.scale(1.5, 1.5);
+  const fl = Math.sin(w.wing);
+  ctx.fillStyle = 'rgba(150,162,185,.5)';
+  ctx.beginPath(); ctx.ellipse(-1, -4 - fl * 1.6, 5, 2, -.6, 0, 6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-1, 4 + fl * 1.6, 5, 2, .6, 0, 6.28); ctx.fill();
+  ctx.fillStyle = '#221a10'; ctx.beginPath(); ctx.ellipse(0, 0, 6.5, 2.7, 0, 0, 6.28); ctx.fill();
+  ctx.fillStyle = '#e0a72e'; ctx.fillRect(-0.5, -2.3, 1.7, 4.6); ctx.fillRect(3, -1.9, 1.4, 3.8);
+  ctx.restore();
+}
+function draw() {
+  let px = 0, py = 0;
+  if (mouse.active && mouse.x != null) { px = (mouse.x - W / 2) / W * P.parallax; py = (mouse.y - H / 2) / H * P.parallax; }
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#cfe4f5'); g.addColorStop(.7, '#eae9dd'); g.addColorStop(1, '#f5efe2');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const sun = ctx.createRadialGradient(W * .9, H * .08, 10, W * .9, H * .08, 360);
+  sun.addColorStop(0, 'rgba(255,244,214,.85)'); sun.addColorStop(1, 'rgba(255,244,214,0)');
+  ctx.fillStyle = sun; ctx.fillRect(0, 0, W, H);
+  drawNest(px * 0.4, py * 0.4);
+  ctx.save(); ctx.translate(px, py);
+  for (const w of wasps) drawWasp(w);
+  ctx.restore();
+}
+
+// ------------------------------------------------------------ loop (60fps cap)
+let last = 0;
+function loop(t) {
+  requestAnimationFrame(loop);
+  if (t - last < 1000 / 60 - 1) return;
+  const dt = last ? Math.min((t - last) / 1000, 0.05) : 0.016; last = t;
+  schedule(dt);
+  for (const w of wasps) step(w, dt);
+  for (let i = wasps.length - 1; i >= 0; i--) if (wasps[i].dead) wasps.splice(i, 1);
+  for (const p of pulses) p.age += dt / 0.9;
+  for (let i = pulses.length - 1; i >= 0; i--) if (pulses[i].age >= 1) pulses.splice(i, 1);
+  draw();
+  const st = document.getElementById('stat');
+  if (st) st.textContent = `airborne ${wasps.length}  ·  arrivals ${arrivals}  ·  departures ${departures}`;
+}
+
+// ------------------------------------------------------------ interaction
+addEventListener('pointermove', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true; });
+addEventListener('pointerdown', (e) => { pulses.push({ x: e.clientX, y: e.clientY, age: 0 }); });
+addEventListener('pointerleave', () => { mouse.active = false; });
+
+// ------------------------------------------------------------ panel
+const panel = document.getElementById('panel');
+const SPEC = [
+  ['population', 4, 40, 1], ['crossingsMin', 1, 30, 1], ['roamRadius', 120, 420, 10],
+  ['cruiseOut', 150, 600, 10], ['cruiseIn', 120, 500, 10], ['roamSpeed', 60, 300, 10],
+  ['orbitAngVel', 60, 260, 5], ['orbitRadius', 30, 120, 2], ['eventRate', 0.05, 1, 0.05],
+  ['landChance', 0, 1, 0.05], ['hoverHold', 0, 2, 0.05], ['wanderAmp', 0, 40, 1],
+  ['sepRadius', 8, 44, 1], ['cursorAvoid', 0, 240, 10], ['parallax', 0, 40, 1],
+];
+panel.innerHTML = '<h3>choreography</h3>';
+for (const [key, min, max, stepv] of SPEC) {
+  const l = document.createElement('label');
+  l.innerHTML = `<span>${key}</span><input type=range min=${min} max=${max} step=${stepv} value=${P[key]}><span id="v_${key}">${P[key]}</span>`;
+  panel.appendChild(l);
+  const inp = l.querySelector('input');
+  inp.addEventListener('input', () => { P[key] = parseFloat(inp.value); document.getElementById('v_' + key).textContent = P[key];
+    if (key === 'population') { while (wasps.length < P.population) spawnInbound(); } });
+}
+const row = document.createElement('div'); row.className = 'row';
+for (const name of Object.keys(PRESETS)) { const b = document.createElement('button'); b.textContent = name;
+  b.onclick = () => { Object.assign(P, PRESETS[name]); syncPanel(); }; row.appendChild(b); }
+panel.appendChild(row);
+const row2 = document.createElement('div'); row2.className = 'row';
+const db = document.createElement('button'); db.textContent = 'Log params';
+db.onclick = () => { const clean = {}; for (const [k] of SPEC) clean[k] = P[k];
+  const j = JSON.stringify(clean, null, 2); const d = document.getElementById('dump'); d.style.display = 'block'; d.textContent = j; console.log('WASP PARAMS\\n' + j); };
+row2.appendChild(db); panel.appendChild(row2);
+function syncPanel() {
+  panel.querySelectorAll('label').forEach((l) => { const key = l.querySelector('span').textContent; const inp = l.querySelector('input');
+    if (key in P) { inp.value = P[key]; document.getElementById('v_' + key).textContent = P[key]; } });
+}
+
+// ------------------------------------------------------------ go
+resize(); addEventListener('resize', resize); seedSwarm();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
