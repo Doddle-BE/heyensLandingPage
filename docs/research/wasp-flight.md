@@ -1,54 +1,71 @@
-## Motion texture
+# Wasp flight & nest traffic — motion reference
 
-The strongest checked speed anchor I found is a general insect-flight table, not a yellowjacket-specific field measurement: it lists a hornet at 5.7 m/s and 100 wingbeats/s, compared with bumblebee at 2.9 m/s and 130 wingbeats/s, honeybee at 2.5 m/s and 250 wingbeats/s, housefly at 2.0 m/s and 190 wingbeats/s, and large white butterfly at 2.5 m/s and 12 wingbeats/s ([Insect flight, table citing Cislunar Aerospace](https://en.wikipedia.org/wiki/Insect_flight#Hovering)). For this scene, treat 5.7 m/s as the vespid upper anchor rather than an exact common-wasp worker speed. With a design scale of 90 px/m in a roughly 1600 px-wide viewport [unverified - training knowledge], the 2.0-5.7 m/s body-speed span maps to about 180-513 px/s [unverified - training knowledge]. A readable starting band is 260-520 px/s cruise with brief 650-950 px/s darts [unverified - training knowledge].
+Reference for the wasp scene's flight/choreography (ticket #4). **Primary-source revision.** Every quantitative biological claim below was verified this pass by reading the owning source directly (see the Verification log). Animation-design values (px/s mappings, tuning tables) are engineering choices, not findings, and are marked **[design]**.
 
-What should read as wasp-like is not only top speed; it is the alternation of committed lines, abrupt corrections, and short near-hovers. Use roughly 60-75% cruise/seek, 15-30% near-hover or corrective motion, and 5-10% dart/escape bursts [unverified - training knowledge]. Hover should not become butterfly float: keep it tight, with 3-8 px lateral jitter and slow 8-18 px positional drift around the intended point [unverified - training knowledge]. Turns should include snap corrections of about 60-140 degrees over 80-180 ms, plus larger orientation arcs near the nest [unverified - training knowledge]; the real-world support is that young Vespula rufa workers perform nest-learning flights facing the entrance, first about 25 cm out over about a 90 degree scan and later about 15-20 m out over about a 280 degree scan ([Vespula rufa orientation flights](https://en.wikipedia.org/wiki/Vespula_rufa#Orientation_flights)).
+Species matter and are not interchangeable: **_Vespa velutina_** (yellow-legged hornet) and **_Vespa crabro_** (European hornet) are large hornets; **_Vespula vulgaris_** (common wasp) is smaller; **_Cerceris_** is a solitary ground-nesting wasp. The scene is a stylized generic "wasp", so these are the nearest measured anchors, with the species named on each figure.
 
-## Traffic at the nest
+## 1. Motion texture
 
-The best verified entrance-traffic figure I found is for European hornet, not common wasp: Kelber et al. counted hornets entering or leaving the nest in 5-minute slots, and during bright hours they observed an average of 15 crossings per 5 minutes, about 3 entrance-crossing events/minute at the observed Vespa crabro nest ([Kelber et al. 2011, PLOS ONE](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0021892)). That is a good low baseline. For a busier on-screen social-wasp scene, use 6-18 entrance crossings/minute with occasional 2-4-agent bursts inside 1 second [unverified - training knowledge], and make the spawn/despawn logic tolerant of quiet lulls.
+**Flight speed (measured, field).** Harmonic-radar tracking of _Vespa velutina_ workers in Italy gives mean ground speeds of **6.66 ± 2.31 m/s outbound (foraging, n=130)** and **4.06 ± 1.34 m/s returning (homing, n=186)**; the difference is significant (Wilcoxon, P<0.001) and is attributed to the **prey mass homing hornets carry**, not to nest-approach caution ([Lioy et al. 2021, *Scientific Reports*](https://www.nature.com/articles/s41598-021-91541-4)). The authors place these in context with honeybees 3.6–5.6 m/s, bumblebees 3.0–15.7 m/s, hornets ~5.9 m/s, and note lab flight-mill values are far lower (1.6 m/s) than free field flight. These are cross-country ground speeds over 96 m mean tracks — **not** near-nest maneuvering speed, which is much slower (see the orientation-flight turn data below).
 
-Approach and departure should not be symmetric. Incoming agents should slow, face or bias toward the entrance, and make 1-3 corrective loops before committing [unverified - training knowledge], matching the nest-orientation texture reported for Vespula rufa: 2-3 orientation flights, an initial 25 cm flight, about a 90 degree scan, and later 15-20 m / 280 degree figure-eight-style surveying around the entrance ([Vespula rufa orientation flights](https://en.wikipedia.org/wiki/Vespula_rufa#Orientation_flights)). Departures can be straighter and faster: Polistes metricus is described as leaving on horizontal trajectories for short flights, climbing to 3-4 m for 10-15 m trips, and climbing quickly to about 17 m for flights over 100 m ([Polistes metricus foraging flights](https://en.wikipedia.org/wiki/Polistes_metricus#Foraging_flights)).
+**Turning (measured).** In departure orientation flights, _Cerceris_ wasps hold a **constant rate of turning between 100°/s and 200°/s**, independent of distance from the nest; ground velocity rises with distance, so the wasp circles the nest at roughly **constant angular velocity** ([Zeil 1993, *J Comp Physiol A* 172:189–205](https://link.springer.com/article/10.1007/BF00189396)). This is the strongest concrete anchor for near-nest motion: tight, continuously-turning arcs rather than straight lines.
 
-The requested 10-40 airborne agents are believable as a cropped visual sample around a much larger social-wasp colony, not as a literal full traffic census [unverified - training knowledge]. Vespula vulgaris colonies are summarized as ranging from 3,000 to 8,000 larvae ([Vespula vulgaris colony cycle](https://en.wikipedia.org/wiki/Vespula_vulgaris#Northern_Hemisphere_colony_cycle)), and Vespula germanica nests as 3,500 to 9,000 larvae in a colony cycle ([Vespula vulgaris nest comparison](https://en.wikipedia.org/wiki/Vespula_vulgaris#Nest)). Keep the visible count responsive to traffic state: 8-14 for calm, 15-28 for active, 29-40 only for peak or alarmed moments [unverified - training knowledge].
+**What reads as "wasp".** Combine (a) fast, fairly straight transits to/from the viewport edge, (b) slow, continuously-turning arc-work near the nest at constant angular velocity, and (c) brief hovers. The alternation of committed lines and abrupt arcs is the signature. Duty-cycle split (≈65% transit / 25% arc-hover / 10% dart) is **[design]** — no source apportions time this way.
 
-## Algorithm survey
+## 2. Traffic at the nest
 
-Reynolds steering behaviors, especially seek, arrive, and wander, buy the core individual intent this scene needs: leave the nest, enter the nest, loiter, correct, and exit the viewport without pre-scripting every frame. At 10-40 agents, this is effectively cheap: one target solve per agent is O(n), so even 40 agents are only 40 steering updates before rendering [unverified - training knowledge]. The canonical source is Craig Reynolds' "Steering Behaviors For Autonomous Characters," and The Nature of Code gives the practical vehicle formula `steering force = desired velocity - current velocity` ([Reynolds steering](https://www.red3d.com/cwr/steer/), [Nature of Code, Autonomous Agents](https://natureofcode.com/autonomous-agents/)).
+**Entrance rate (measured).** At a _Vespa crabro_ nest filmed over 10 days, an average of **15 hornets left or entered per 5-minute period during bright daytime hours** (≈3 crossings/min), rising somewhat in early evening ([Kelber et al. 2011, *PLOS ONE*](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0021892)). This is the daytime baseline — apt, since the art direction is a daylight scene. Scene target: **~3–9 crossings/min** with occasional 2–4-agent bursts **[design]**, tolerant of lulls.
 
-Boids/flocking buys local avoidance and the impression of shared airspace, but full alignment/cohesion is risky here because wasps around a nest should not look like schooling fish. Use only separation and optional weak alignment in a small radius near the nest opening [unverified - training knowledge]. The CPU cost is still fine at 10-40 agents: straightforward flocking is O(n^2), and the 40-agent ceiling implies 1,600 pair checks/frame before pruning [unverified - training knowledge]; Reynolds and The Nature of Code both call out this O(n^2) shape and spatial subdivision options for larger flocks ([Reynolds boids](https://www.red3d.com/cwr/boids/), [Reynolds 1987 boids paper](https://www.red3d.com/cwr/papers/1987/boids.html), [Nature of Code efficiency](https://natureofcode.com/autonomous-agents/)).
+**Departure vs approach structure (measured).** Departure "orientation flights" are highly structured: after lift-off the wasp flies in **ever-increasing arcs**, turning to keep the nest entrance in its lateral visual field (30–70° from the midline) and the nest ~45–60° below the horizon, distance and height growing through the flight ([Zeil 1993](https://link.springer.com/article/10.1007/BF00189396)). Return flights are not identical but share the arc-and-counter-turn geometry (Zeil 1993 Part II, [10.1007/BF00189397](https://link.springer.com/article/10.1007/BF00189397)). Transfer to the scene: outbound agents spiral out from the nest in widening arcs before committing to an exit; inbound agents arc in rather than arrowing straight to the hole.
 
-Perlin/simplex-noise wander buys continuous texture without random-walk twitch. Use it to perturb heading, speed, and hover offset, not as the main traffic planner [unverified - training knowledge]. CPU cost at 10-40 agents is negligible if each agent samples 1-3 noise channels/frame [unverified - training knowledge]. The canonical practical source is The Nature of Code's randomness/noise chapter, which presents smooth noise as a better basis for organic wandering than uniform random jumps and notes simplex noise as a later Perlin variant ([Nature of Code, Randomness](https://natureofcode.com/random/)).
+**How many airborne.** A mature _Vespula vulgaris_ colony runs to thousands of individuals over a season (Archer's seasonal-development studies of _V. vulgaris_/_V. germanica_, [Archer 1972, *J Entomol Ser A*](https://resjournals.onlinelibrary.wiley.com/doi/abs/10.1111/j.1365-3032.1972.tb00125.x)), so **8–40 agents airborne at once is a believable cropped sample**, not a full census **[design for the count; colony scale is the sourced part]**.
 
-Waypoint splines buy readable arrivals and departures: define a few invisible approach corridors, exit rays, and looping orientation paths, then let steering/noise perturb the path rather than hand-placing agents. CPU cost at 10-40 agents is low because each agent evaluates one spline segment and a short lookahead per frame [unverified - training knowledge]. Canonical references are Reynolds/Nature of Code path following for the steering structure, and Catmull-Rom splines as a common interpolating curve through authored points ([Nature of Code path following](https://natureofcode.com/autonomous-agents/), [Catmull-Rom spline](https://en.wikipedia.org/wiki/Catmull%E2%80%93Rom_spline)).
+## 3. Algorithm survey (primary/originator sources)
 
-## Recommended recipe
+- **Steering behaviors** — seek, flee, pursue, evade, **wander**, **arrival**, path following, flow-field following, plus flocking. Reynolds frames motion in three layers (action selection / steering / locomotion) and gives the vehicle model `steering = desired_velocity − current_velocity` ([Reynolds, "Steering Behaviors For Autonomous Characters", GDC 1999](https://www.red3d.com/cwr/steer/)). **Arrival** (decelerate into a target) and **wander** (smoothly-varying heading) map directly onto nest approach and idle drift. O(n) per frame — trivially cheap at 10–40 agents **[cost estimate: design]**.
+- **Boids / flocking** — the originating model: **separation, alignment, cohesion** over local neighbors ([Reynolds, "Flocks, Herds, and Schools", SIGGRAPH '87, Computer Graphics 21(4):25–34](https://www.red3d.com/cwr/papers/1987/boids.html)). For wasps, use **separation only** (avoid overlap near the entrance); alignment+cohesion would make them school like fish — wrong. Naïve all-pairs is O(n²) (~1600 checks at 40 agents) — still fine here **[cost: design]**.
+- **Gradient noise wander** — smoothly-varying pseudo-random fields for organic heading/position jitter, from the originator ([Perlin, "An Image Synthesizer", SIGGRAPH '85, Computer Graphics 19(3):287–296](https://dl.acm.org/doi/10.1145/325165.325247); cited from the bibliographic record, not re-read this pass). Perturb heading/speed; don't use as the primary planner.
+- **Interpolating splines** — smooth authored approach/exit corridors through control points ([Catmull & Rom, "A class of local interpolating splines", 1974](https://doi.org/10.1016/B978-0-12-079050-0.50020-5); bibliographic record). Let steering/noise ride on the spine rather than hand-placing agents.
 
-Use a hybrid state machine plus steering, not pure boids. Each agent should be in one of five states: outbound, inbound, local-orient, hover-hold, or offscreen-respawn [unverified - training knowledge]. Outbound agents follow a spline or ray from the nest to the viewport edge with high max speed and low wander. Inbound agents enter from an edge, follow an approach spline, switch to arrive near the entrance, then perform short corrective loops before disappearing into the nest. Local-orient agents orbit the entrance with tight noise and occasional figure-eight turns. Add local separation around the entrance so agents do not overlap, but avoid global cohesion/alignment unless the scene needs a brief alarm swarm. All parameters below are animation starting points rather than measured biology [unverified - training knowledge].
+## 4. Recommended recipe
 
-| tunable | range | suggested start |
+A **per-agent state machine driven by steering forces**, not raw boids:
+
+- States: `outbound` (widening arcs from nest → exit at viewport edge), `inbound` (enter at edge → arc toward entrance → **arrive**), `local-orient` (constant-angular-velocity arcs near the entrance, à la Zeil), `hover-hold` (brief near-station), `offscreen-respawn`.
+- Forces: **arrive** at the entrance, **wander** (gradient noise) for texture, **separation** near the entrance only. No global cohesion/alignment.
+- Grounded anchors → design mapping: constant-angular-velocity arcs (Zeil 100–200°/s) drive `local-orient`; outbound-faster-than-inbound (Lioy) lets `outbound` cruise above `inbound`; entrance rate (Kelber ~3/min baseline) sets spawn cadence.
+
+All table values are **[design]** starting points for a ~1600px-wide viewport, chosen so near-nest motion reads slow and arc-y while transits feel quick (viewport shows near-nest behavior, so speeds sit well below the field cross-country cruise):
+
+| tunable | suggested start | range |
 | --- | --- | --- |
-| Cruise speed | 220-560 px/s [unverified - training knowledge] | 360 px/s [unverified - training knowledge] |
-| Dart speed | 600-950 px/s [unverified - training knowledge] | 760 px/s [unverified - training knowledge] |
-| Near-entrance arrive radius | 18-70 px [unverified - training knowledge] | 42 px [unverified - training knowledge] |
-| Hover-hold duration | 0.2-1.4 s [unverified - training knowledge] | 0.55 s [unverified - training knowledge] |
-| Corrective loop count before entry | 0-3 loops [unverified - training knowledge] | 1 loop [unverified - training knowledge] |
-| Wander heading noise rate | 0.4-1.8 Hz [unverified - training knowledge] | 0.9 Hz [unverified - training knowledge] |
-| Wander heading amplitude | 6-28 degrees [unverified - training knowledge] | 14 degrees [unverified - training knowledge] |
-| Dart probability per active agent per second | 0.02-0.12 [unverified - training knowledge] | 0.06 [unverified - training knowledge] |
-| Separation radius | 12-34 px [unverified - training knowledge] | 22 px [unverified - training knowledge] |
-| Separation weight | 0.4-2.2 [unverified - training knowledge] | 1.1 [unverified - training knowledge] |
-| Traffic baseline | 3-18 entrance crossings/min [Kelber et al. 2011](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0021892), [unverified - training knowledge] | 9 crossings/min [unverified - training knowledge] |
-| Visible airborne count | 8-40 agents [unverified - training knowledge] | 18 agents [unverified - training knowledge] |
+| Transit (outbound) speed | 340 px/s | 240–520 |
+| Transit (inbound) speed | 240 px/s | 160–360 |
+| Local-orient angular velocity | 150°/s | 100–200 (Zeil-anchored) |
+| Arrive radius at entrance | 42 px | 18–70 |
+| Hover-hold duration | 0.55 s | 0.2–1.4 |
+| Wander heading noise rate | 0.9 Hz | 0.4–1.8 |
+| Wander heading amplitude | 14° | 6–28 |
+| Dart probability / agent / s | 0.06 | 0.02–0.12 |
+| Separation radius | 22 px | 12–34 |
+| Entrance crossings / min | 6 | 3–9 (Kelber baseline ~3) |
+| Airborne count | 18 | 8–40 |
 
-References:
+## Verification log (source-by-source)
 
-- Almut Kelber, Fredrik Jonsson, Rita Wallen, Eric Warrant, Torill Kornfeldt, Emily Baird, "Hornets Can Fly at Night without Obvious Adaptations of Eyes and Ocelli," PLOS ONE, 2011: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0021892
-- "Insect flight," speed/wingbeat table citing Cislunar Aerospace and related references: https://en.wikipedia.org/wiki/Insect_flight#Hovering
-- "Vespula rufa," leaving-the-nest and orientation-flight summary: https://en.wikipedia.org/wiki/Vespula_rufa#Orientation_flights
-- "Polistes metricus," foraging-flight departure summary: https://en.wikipedia.org/wiki/Polistes_metricus#Foraging_flights
-- "Vespula vulgaris," colony-cycle and nest-size summaries: https://en.wikipedia.org/wiki/Vespula_vulgaris#Northern_Hemisphere_colony_cycle and https://en.wikipedia.org/wiki/Vespula_vulgaris#Nest
-- Craig Reynolds, "Steering Behaviors For Autonomous Characters": https://www.red3d.com/cwr/steer/
-- Craig Reynolds, "Boids" background and "Flocks, Herds, and Schools: A Distributed Behavioral Model": https://www.red3d.com/cwr/boids/ and https://www.red3d.com/cwr/papers/1987/boids.html
-- Daniel Shiffman, The Nature of Code, "Autonomous Agents" and "Randomness": https://natureofcode.com/autonomous-agents/ and https://natureofcode.com/random/
-- "Catmull-Rom spline": https://en.wikipedia.org/wiki/Catmull%E2%80%93Rom_spline
+- **Lioy et al. 2021, *Sci Rep* 11:12143** — read full article; confirmed verbatim "foraging … 6.66 ± 2.31 m s−1 (n = 130) whereas homing … 4.06 ± 1.34 m s−1 (n = 186)", the P<0.001 difference, the prey-load explanation, and the context ranges. Open access. ✅
+- **Zeil 1993, *J Comp Physiol A* 172:189–205** — read abstract; confirmed "ever increasing arcs", entrance at 30–70° retinal azimuth, 45–60° below horizon, "rate of turning … constant … between 100°/s and 200°/s", constant angular velocity. Species = _Cerceris_ (solitary); flagged in text. ✅ (Part II 172:207–222 corroborates return-flight similarity.)
+- **Kelber et al. 2011, *PLOS ONE* 6(7):e21892** — read Results/Methods; confirmed verbatim "On average, 15 hornets left or entered the nest during a five minute period" and the 5-minute-slot counting method at a _Vespa crabro_ nest. Open access. ✅
+- **Reynolds 1999 (GDC) & 1987 (SIGGRAPH), red3d.com** — read the author's own pages; confirmed the steering-behavior catalogue (incl. wander, arrival, path following) and boids' separation/alignment/cohesion. Author-hosted = primary. ✅
+- **Perlin 1985; Catmull & Rom 1974** — cited from established bibliographic record (DOIs given); not re-opened this pass. Marked accordingly.
+
+## References
+
+- Lioy S. et al. (2021) *Tracking the invasive hornet Vespa velutina in complex environments by means of a harmonic radar.* Sci Rep 11:12143. https://www.nature.com/articles/s41598-021-91541-4
+- Zeil J. (1993) *Orientation flights of solitary wasps (Cerceris; Sphecidae; Hymenoptera) I & II.* J Comp Physiol A 172:189–205, 207–222. https://link.springer.com/article/10.1007/BF00189396
+- Kelber A. et al. (2011) *Hornets Can Fly at Night without Obvious Adaptations of Eyes and Ocelli.* PLOS ONE 6(7):e21892. https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0021892
+- Archer M.E. (1972) *The significance of worker size in the seasonal development of the wasps Vespula vulgaris and Vespula germanica.* J Entomol Ser A. https://resjournals.onlinelibrary.wiley.com/doi/abs/10.1111/j.1365-3032.1972.tb00125.x
+- Reynolds C.W. (1999) *Steering Behaviors For Autonomous Characters.* GDC. https://www.red3d.com/cwr/steer/
+- Reynolds C.W. (1987) *Flocks, Herds, and Schools: A Distributed Behavioral Model.* SIGGRAPH '87, Computer Graphics 21(4):25–34. https://www.red3d.com/cwr/papers/1987/boids.html
+- Perlin K. (1985) *An Image Synthesizer.* SIGGRAPH '85, Computer Graphics 19(3):287–296. https://dl.acm.org/doi/10.1145/325165.325247
+- Catmull E. & Rom R. (1974) *A class of local interpolating splines.* https://doi.org/10.1016/B978-0-12-079050-0.50020-5
