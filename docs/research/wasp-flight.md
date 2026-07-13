@@ -36,12 +36,13 @@ The implementation consequence is a **traffic scheduler plus per-agent state mac
 | taxon and context | measurement | what it can support | limitation |
 | --- | --- | --- | --- |
 | *Vespula vulgaris*, free flight between flowers 10 cm apart | Golding et al. filmed 21 flights by 13 wasps at 0.04 s per frame. Their Fig. 3 places the mean at approximately **0.16 m/s**. Speed excluded intervals below **0.05 m/s**, the study's operational definition of hovering ([Methods, Fig. 3](https://doi.org/10.1242/jeb.01932)). | A defensible slow, close-range inspection/feeding-flight anchor. | It is a 10 cm outdoor flower array, not cruise between nest and forage and not a nest approach. The approximate 0.16 m/s value is read from the plotted mean, not a number printed in the text. |
+| *Vespa velutina*, harmonic-radar-tracked field transits between nests and apiaries | Outbound “foraging” ground speed was **6.66 ± 2.31 m/s** (`n = 130`); homing ground speed was **4.06 ± 1.34 m/s** (`n = 186`, Wilcoxon `P < 0.001`) ([Lioy et al. 2021, Results “Vespa velutina flying speed,” Fig. 5](https://doi.org/10.1038/s41598-021-91541-4)). | A free-field, long-range hornet-transit anchor and a measured directional asymmetry. | Tagged autumn workers were followed over tracks averaging 96 ± 62 m; these are ground speeds, not airspeeds or final nest-approach speeds. The authors say the slower homing group probably reflects carried prey mass or predation energy cost. It is a hornet, not *Vespula* or *Polistes*. |
 | *Vespa velutina nigrithorax*, tethered workers on a 318.3 mm-radius computerized flight mill | Mean flight-phase speed was **1.56 ± 0.29 m/s**, range **0.90–2.10 m/s**, using each worker's first five tests ([Sauvard et al. 2018, Results “Daily flight capacity,” Fig. 4](https://doi.org/10.1371/journal.pone.0198597)). | A hornet-scale sustained-flight bracket, useful only as a separate regime from close inspection. | The authors explicitly say flight mills do not capture natural dynamics and can over- or underestimate performance; the apparatus removes normal stimuli and body-weight support while adding mill resistance ([Introduction and “Flight mill design”](https://doi.org/10.1371/journal.pone.0198597)). It is a hornet, not *Vespula* or *Polistes*. |
-| *Polistes* paper wasps | **Gap:** no comparable primary measurement of unrestrained routine nest-approach speed was verified here. | None. Keep paper-wasp speed independently tunable. | Do not apply either *Vespula* flower speed or *Vespa* flight-mill speed as a measured *Polistes* value. |
+| *Polistes* paper wasps | **Gap:** no comparable primary measurement of unrestrained routine nest-approach speed was verified here. | None. Keep paper-wasp speed independently tunable. | Do not apply the *Vespula* flower speed or either *Vespa* field/laboratory speed as a measured *Polistes* value. |
 
-The old 5.7 m/s “hornet” value is intentionally removed: its route through an encyclopedia/table did not lead to a defensible original measurement for this scene.
+The old 5.7 m/s “hornet” value remains removed: its route through an encyclopedia/table did not lead to a defensible original measurement for this scene. A nearby order of magnitude is now supported separately by Lioy et al.'s measured *V. velutina* field tracks, with their own taxon, direction, season, ground-speed, and tracking-context caveats.
 
-**Derived physical-to-screen mapping.** If the art later establishes a scale of `S` pixels per metre, the two measured contexts map to approximately `0.16 × S` px/s for close *V. vulgaris* flower inspection and `1.56 × S` px/s for tethered *V. velutina* flight. Without `S`, any px/s figure is necessarily a **design value**, not a converted biological speed.
+**Derived physical-to-screen mapping.** If the art later establishes a scale of `S` pixels per metre, the measured contexts map to approximately `0.16 × S` px/s for close *V. vulgaris* flower inspection; `1.56 × S` px/s for tethered *V. velutina* flight; and `6.66 × S` outbound or `4.06 × S` homing px/s for tracked *V. velutina* field transit. Without `S`, any px/s figure is necessarily a **design value**, not a converted biological speed.
 
 ### Hovering, zigzags, turns, and orientation flights
 
@@ -56,11 +57,13 @@ The old 5.7 m/s “hornet” value is intentionally removed: its route through a
 
 The closest quantified nest-departure choreography found is for solitary *Cerceris*, not any social wasp. After take-off, *Cerceris* used successively larger arcs; kept the nest about 30–70° from the visual midline and 45–60° below the horizon; turned at roughly 100–200°/s independent of nest distance; and increased ground speed with distance ([Zeil 1993, abstract](https://doi.org/10.1007/BF00189396)). A later three-dimensional reconstruction of *Cerceris australis* found that a learning flight begins by turning to face the entrance, then alternates arc reversals, sideways translations, and saccadic counterturning; arcs widen over the flight, with pivoting above 400°/s during fast transitions and about 100–200°/s during nest fixation ([Stürzl et al. 2016, Results “The Behavioral Organization of Learning Flights,” Figs. 1–2](https://doi.org/10.1016/j.cub.2015.12.052)).
 
+A companion study of *Cerceris* return flights found that returning wasps did not retrace the departure path exactly, but both departures and returns used arcs with counterturning at similar angular velocities and faced in similar directions relative to the nest and nearby landmarks ([Zeil 1993, Part II abstract](https://doi.org/10.1007/BF00189397)). This supports an arc-and-counterturn motif during nest return/search, but still does not measure routine social-wasp approach or exact landing choreography.
+
 **Animation transfer, explicitly inferred:** occasional expanding arcs while the sprite remains oriented toward the entrance are a defensible learning-flight motif. Applying the solitary-*Cerceris* angles or rates numerically to *Vespula*, *Vespa*, or *Polistes* would not be defensible. Use those values only as loose authoring references, not species measurements.
 
 #### Hornets and paper wasps
 
-- **Hornets:** the flight-mill study measures sustained speed/capacity, not hover, turns, landing, or nest learning ([Sauvard et al. 2018](https://doi.org/10.1371/journal.pone.0198597)).
+- **Hornets:** the harmonic-radar study measures long-range field transit ground speed, while the flight-mill study measures sustained laboratory speed/capacity; neither measures hover, turns, landing, or nest learning ([Lioy et al. 2021](https://doi.org/10.1038/s41598-021-91541-4); [Sauvard et al. 2018](https://doi.org/10.1371/journal.pone.0198597)).
 - **Paper wasps:** **Gap:** no primary *Polistes* nest-approach/landing kinematics suitable for numeric animation parameters was verified here.
 
 Consequently, there is no evidence-based universal “wasp duty cycle,” dart probability, loop count, hover radius, or snap-turn duration. Those must remain **design controls**.
@@ -238,7 +241,7 @@ Over a 10-minute deterministic-seed run of the hornet-daylight preset:
 
 No suitable primary source verified here provides:
 
-- a free-flight cruise-speed distribution for routine *Vespula*, *Vespa*, and *Polistes* nest traffic under comparable conditions;
+- a near-entrance free-flight speed distribution for routine *Vespula*, *Vespa*, and *Polistes* traffic under comparable conditions (Lioy et al. measure long-range *V. velutina* field transit only);
 - a measured dart frequency or cruise/hover/dart duty cycle for routine social-wasp traffic;
 - exact routine social-wasp nest-landing loop counts, hover radii, or approach distances;
 - a simultaneous airborne census around a nest that supports 10–40 visible agents;
@@ -267,3 +270,5 @@ Those quantities should remain named controls in implementation and documentatio
 16. Shiffman, D. *The Nature of Code* p5.js source examples, chapter 6. <https://github.com/shiffman/The-Nature-of-Code-Examples-p5.js/tree/master/chp06_agents>
 17. Alkhoori, M. “Swarm of Bees,” p5 Web Editor source project. <https://editor.p5js.org/mariamalkhoori/sketches/exMNOF-7n>
 18. Kogan, G. “swarm,” p5.js source sketch. <https://github.com/genekogan/p5js-sketches/tree/master/swarm>
+19. Lioy, S., et al. (2021). “Tracking the invasive hornet *Vespa velutina* in complex environments by means of a harmonic radar.” *Scientific Reports* 11, 12143. <https://doi.org/10.1038/s41598-021-91541-4>
+20. Zeil, J. (1993). “Orientation flights of solitary wasps (*Cerceris*; Sphecidae; Hymenoptera). II. Similarities between orientation and return flights and the use of motion parallax.” *Journal of Comparative Physiology A* 172, 207–222. <https://doi.org/10.1007/BF00189397>
