@@ -1,8 +1,85 @@
-// Main — picks the renderer (WebGL2 photoreal sky, else legacy 2D field),
-// owns the RAF loop, perf fallback, resize, visibilitychange.
+// Main — scene dispatch on ?scene= (wasps default; starfield preserved), then
+// owns the per-scene RAF loop, perf fallback, resize, visibilitychange.
 // COORDINATE CONTRACT: all logic in CSS pixel space; DPR is render-only.
 
 (function () {
+  // ---- Scene dispatch (Option model) -------------------------------------
+  // ?scene= selects the scene; wasps is the default. The static <head> carries
+  // the wasp identity; the starfield branch swaps the chrome back to the sky's.
+  const activeScene = new URLSearchParams(location.search).get('scene') === 'starfield' ? 'starfield' : 'wasps';
+
+  if (activeScene === 'wasps') {
+    const waspCanvas = document.getElementById('starfield');
+    const wHint = document.getElementById('hint');
+    if (wHint && matchMedia('(pointer: coarse)').matches) wHint.textContent = 'swipe to part them · tap to scatter';
+
+    // Reduced motion: one settled still frame (no loop), mirroring the sky.
+    // CSS overlay remains the no-JS fallback.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const wStill = (typeof waspCreate === 'function') ? waspCreate(waspCanvas) : null;
+      if (!wStill) return;
+      document.body.classList.add('gl-still');
+      let wTicks = 0;
+      (function drawWaspStill() {
+        wStill.resize(); wStill.renderStill();
+        if (++wTicks < 12) requestAnimationFrame(drawWaspStill);
+      })();
+      let wStillTimer = null;
+      window.addEventListener('resize', () => {
+        clearTimeout(wStillTimer);
+        wStillTimer = setTimeout(() => { wStill.resize(); wStill.renderStill(); }, 150);
+      });
+      return;
+    }
+
+    const wasp = (typeof waspCreate === 'function') ? waspCreate(waspCanvas) : null;
+    if (!wasp) return;                       // no 2D context: CSS overlay remains
+
+    let wHintTimer = null;
+    inputBind(() => { if (wHint && !wHintTimer) wHintTimer = setTimeout(() => wHint.classList.add('fade'), 2600); });
+
+    // Loop mirrors the sky's glLoop: 60fps active / 30fps unfocused, adaptive
+    // slow-frame degrade, DPR-change detection, resize debounce, visibility.
+    let wPrev = null, wLastRender = 0, wLastInput = performance.now(), wDpr = window.devicePixelRatio || 1;
+    let wSlow = 0, wCanDegrade = true, wEma = 16.7;
+    const W_ACTIVE = 1000 / 60, W_BG = 1000 / 30;
+    for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown']) {
+      window.addEventListener(ev, () => { wLastInput = performance.now(); }, { passive: true });
+    }
+    function waspLoop(t) {
+      requestAnimationFrame(waspLoop);
+      const focused = document.hasFocus() || performance.now() - wLastInput < 10000;
+      const targetMs = focused ? W_ACTIVE : W_BG;
+      if (t - wLastRender < targetMs - 1) return;
+      wLastRender = Math.max(wLastRender + targetMs, t - targetMs);
+      if (wPrev != null) {
+        const dt = t - wPrev;
+        wEma += (Math.min(dt, 100) - wEma) * 0.05;
+        const slowThreshold = Math.max(SLOW_FRAME_THRESHOLD_MS, wEma * 1.7);
+        if (wCanDegrade && !document.hidden) {
+          if (dt > slowThreshold) { if (++wSlow >= 20) { wCanDegrade = wasp.degrade(); wSlow = 0; } }
+          else if (wSlow > 0) wSlow--;
+        }
+      }
+      wPrev = t;
+      const dprNow = window.devicePixelRatio || 1;
+      if (dprNow !== wDpr) { wDpr = dprNow; wasp.resize(); }
+      mouseDecay();
+      wasp.frame(t, mouse, pulses, look);
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { wPrev = null; wLastRender = 0; } });
+    let wResizeTimer = null;
+    window.addEventListener('resize', () => { clearTimeout(wResizeTimer); wResizeTimer = setTimeout(() => wasp.resize(), 150); });
+    requestAnimationFrame(waspLoop);
+    return;
+  }
+
+  // ---- Starfield: swap chrome back to the star identity, then fall through
+  // to the existing (unchanged) sky renderer below. -----------------------
+  document.title = '\u2726';
+  { const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute('content', '#05060c'); }
+  { const f = document.querySelector('link[rel="icon"]'); if (f) f.setAttribute('href', "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='6' fill='%23FFDCA0'/></svg>"); }
+  { const h = document.getElementById('hint'); if (h) h.textContent = 'drag to look around \u00b7 click to make a wish'; }
   const canvas = document.getElementById('starfield');
 
   // Reduced motion: render ONE settled GL frame (no loop, no choreography)

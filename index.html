@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>✦</title>
-    <meta name="theme-color" content="#05060c" />
-    <meta property="og:title" content="✦" />
+    <title>🐝</title>
+    <meta name="theme-color" content="#cfe4f5" />
+    <meta property="og:title" content="🐝" />
     <meta property="og:description" content="·" />
     <meta property="og:type" content="website" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='6' fill='%23FFDCA0'/></svg>" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><g transform='rotate(35 16 16)'><ellipse cx='15' cy='16' rx='9' ry='5.5' fill='%23e0a72e'/><rect x='11' y='11' width='2.3' height='10' fill='%23221a10'/><rect x='16' y='11' width='2.3' height='10' fill='%23221a10'/><circle cx='24' cy='16' r='3.2' fill='%23221a10'/><ellipse cx='13' cy='9.5' rx='6' ry='2.6' fill='%23ffffff' opacity='0.55'/></g></svg>" />
     <link rel="stylesheet" href="styles/main.css" />
   </head>
   <body>
     <canvas id="starfield" aria-hidden="true"></canvas>
-    <div class="hint" id="hint" aria-hidden="true">drag to look around · click to make a wish</div>
+    <div class="hint" id="hint" aria-hidden="true">move to part the swarm · click to scatter them</div>
     <div id="reduced-motion-overlay" aria-live="polite">
       <div class="static-stars" aria-hidden="true"></div>
       <p>Motion is turned off<br><span>Enable it in Settings → Accessibility → Motion</span></p>
@@ -21,6 +21,7 @@
     <script src="scripts/config.js"></script>
     <script src="scripts/starfield.js"></script>
     <script src="scripts/starfield-gl.js"></script>
+    <script src="scripts/wasps.js"></script>
     <script src="scripts/input.js"></script>
     <script src="scripts/main.js"></script>
   </body>
