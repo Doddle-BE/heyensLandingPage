@@ -104,6 +104,31 @@ layout(location=0) in vec2 aClip;
 out vec2 vUv;
 void main(){ vUv = aClip*0.5+0.5; gl_Position = vec4(aClip,0.,1.); }`;
 
+  // Shared by every screen-space pass that needs cheap white noise.
+  const HASH12 = `
+float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }`;
+
+  // Screen-px vertex position -> clip space (y down), shared by the overlays.
+  const SCREEN_TO_CLIP = `
+vec4 screenToClip(vec2 p, vec2 res){
+  vec2 clip = (p/res)*2.0 - 1.0;
+  return vec4(clip.x, -clip.y, 0.0, 1.0);
+}`;
+
+  // Finish pass math, shared by the composite and the direct (no-FP16) path.
+  const GRAIN_STRENGTH = 0.030;
+  const FINISH = `${HASH12}
+const float GRAIN_STRENGTH = ${GRAIN_STRENGTH.toFixed(4)};
+float vignetteAmount(vec2 uv, float aspect){
+  vec2 p = (uv-0.5)*vec2(aspect,1.0);
+  float d = length(p)/0.72;
+  return smoothstep(0.62, 1.18, d)*0.40;
+}
+float grainAmount(vec2 uv, vec2 res, float t){
+  float n = hash12(uv*res + fract(t*0.731)*913.7);
+  return max(0.0, n-0.55);
+}`;
+
   const NOISE3 = `
 float hash13(vec3 p){ p=fract(p*0.1031); p+=dot(p,p.zyx+31.32); return fract((p.x+p.y)*p.z); }
 float vnoise3(vec3 p){
@@ -285,7 +310,7 @@ precision highp float;
 in vec3 vColor; in float vI; in float vSize; in float vSpike; in float vSeed;
 uniform float uDpr, uExposure;
 out vec4 o;
-float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+${HASH12}
 void main(){
   vec2 d = gl_PointCoord - 0.5;
   // Per-star anisotropy: real scattered light is never a perfect disc.
@@ -333,10 +358,10 @@ layout(location=0) in vec2 aPos;       // screen px
 layout(location=1) in float aAlpha;
 uniform vec2 uRes;
 out float vA;
+${SCREEN_TO_CLIP}
 void main(){
   vA = aAlpha;
-  vec2 clip = (aPos/uRes)*2.0 - 1.0;
-  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  gl_Position = screenToClip(aPos, uRes);
 }`;
 
   const FS_LINES = `#version 300 es
@@ -351,17 +376,17 @@ layout(location=1) in vec2 aUv;        // x: 0 head -> 1 tail, y: -1..1 across
 layout(location=2) in vec2 aMeta;      // alpha, colorMix
 uniform vec2 uRes;
 out vec2 vUv; out vec2 vMeta;
+${SCREEN_TO_CLIP}
 void main(){
   vUv = aUv; vMeta = aMeta;
-  vec2 clip = (aPos/uRes)*2.0 - 1.0;
-  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  gl_Position = screenToClip(aPos, uRes);
 }`;
 
   const FS_STREAK = `#version 300 es
 precision highp float;
 in vec2 vUv; in vec2 vMeta; out vec4 o;
 uniform float uExposure, uTime;
-float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+${HASH12}
 void main(){
   float across = exp(-vUv.y*vUv.y*3.2);
   float along = pow(max(0.0, 1.0-vUv.x), 1.8)*0.5;
@@ -378,11 +403,10 @@ layout(location=0) in vec2 aUnit;
 uniform vec2 uRes, uCenter;
 uniform float uHalf;
 out vec2 vLocal;
+${SCREEN_TO_CLIP}
 void main(){
   vLocal = aUnit*uHalf;
-  vec2 p = uCenter + vLocal;
-  vec2 clip = (p/uRes)*2.0 - 1.0;
-  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  gl_Position = screenToClip(uCenter + vLocal, uRes);
 }`;
 
   const FS_RING = `#version 300 es
@@ -443,7 +467,7 @@ in vec2 vUv; out vec4 o;
 uniform sampler2D uScene, uBloomA, uBloomB;
 uniform vec2 uRes;
 uniform float uBloomStr, uTonemapE, uAspect, uTime, uGrainAmt, uLevelB;
-float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+${FINISH}
 void main(){
   vec3 c = texture(uScene, vUv).rgb;
   if (any(isnan(c))) c = vec3(0.0);       // residual NaN safety
@@ -451,11 +475,8 @@ void main(){
              + texture(uBloomB, vUv).rgb * 0.45 * uLevelB;
   c += bloom * uBloomStr;
   c = 1.0 - exp(-c * uTonemapE);               // filmic-ish shoulder
-  vec2 p = (vUv-0.5)*vec2(uAspect,1.0);
-  float d = length(p)/0.72;
-  c *= 1.0 - smoothstep(0.62, 1.18, d)*0.40;   // vignette (matches direct path)
-  float n = hash12(vUv*uRes + fract(uTime*0.731)*913.7);
-  c += vec3(max(0.0, n-0.55)*uGrainAmt);       // sensor grain
+  c *= 1.0 - vignetteAmount(vUv, uAspect);
+  c += vec3(grainAmount(vUv, uRes, uTime)*uGrainAmt);
   c += (hash12(vUv*uRes+17.7)-0.5)*(1.5/255.0); // output dither
   o = vec4(c, 1.0);
 }`;
@@ -464,11 +485,9 @@ void main(){
 precision highp float;
 in vec2 vUv; out vec4 o;
 uniform float uAspect;
+${FINISH}
 void main(){
-  vec2 p = (vUv-0.5)*vec2(uAspect,1.0);
-  float d = length(p)/0.72;
-  float vig = smoothstep(0.62, 1.18, d)*0.40;
-  o = vec4(0.0, 0.0, 0.0, vig);
+  o = vec4(0.0, 0.0, 0.0, vignetteAmount(vUv, uAspect));
 }`;
 
   const FS_GRAIN = `#version 300 es
@@ -476,11 +495,9 @@ precision highp float;
 in vec2 vUv; out vec4 o;
 uniform vec2 uRes;
 uniform float uTime;
-float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+${FINISH}
 void main(){
-  float n = hash12(vUv*uRes + fract(uTime*0.731)*913.7);
-  float g = max(0.0, n-0.55)*0.030;
-  o = vec4(vec3(g), 1.0);
+  o = vec4(vec3(grainAmount(vUv, uRes, uTime)*GRAIN_STRENGTH), 1.0);
 }`;
 
   // ----------------------------------------------------------- GL utilities
@@ -515,6 +532,16 @@ void main(){
       gl.deleteShader(vs);
       gl.deleteShader(fs);
     }
+  }
+  // LINEAR-filtered 2D texture with the given wrap modes, left bound.
+  function createTexture2D(wrapS, wrapT) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
+    return tex;
   }
   function uniforms(p, names) {
     const u = {};
@@ -832,12 +859,7 @@ void main(){
 
   function bakeSky() {
     if (!skyTex) {
-      skyTex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, skyTex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);       // lon seam
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      skyTex = createTexture2D(gl.REPEAT, gl.CLAMP_TO_EDGE);              // lon seam
       skyFbo = gl.createFramebuffer();
     }
     gl.bindTexture(gl.TEXTURE_2D, skyTex);
@@ -857,12 +879,7 @@ void main(){
   }
 
   function makeTarget(w, h) {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const tex = createTexture2D(gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -1372,7 +1389,7 @@ void main(){
       gl.uniform1f(uComposite.uTonemapE, CFG.TONEMAP_E);
       gl.uniform1f(uComposite.uAspect, W / H);
       gl.uniform1f(uComposite.uTime, uTime);
-      gl.uniform1f(uComposite.uGrainAmt, grainOn ? 0.030 : 0.0);
+      gl.uniform1f(uComposite.uGrainAmt, grainOn ? GRAIN_STRENGTH : 0.0);
       gl.uniform1f(uComposite.uLevelB, levelB);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     } else {
