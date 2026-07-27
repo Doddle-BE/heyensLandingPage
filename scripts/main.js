@@ -15,7 +15,11 @@
   function sceneFailed(scene, reason, err) {
     if (err !== undefined) console.error(`main: ${scene} scene unavailable — ${reason}`, err);
     else console.error(`main: ${scene} scene unavailable — ${reason}`);
+    // The canvas carries its own background and covers the viewport, so the
+    // body colour alone would stay hidden behind it.
     document.body.style.background = FALLBACK_BG[scene];
+    const c = document.getElementById('starfield');
+    if (c) c.style.background = FALLBACK_BG[scene];
   }
 
   // Guards a renderer call. Without this a throw inside frame() repeats on
