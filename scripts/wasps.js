@@ -37,7 +37,7 @@ function waspCreate(canvas) {
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return null;
 
-  let W = 0, H = 0;
+  let W = 0, H = 0, DPR = 1;
   let prevT = 0, topup = 0, cross = 0;
   let effPop, effRoam;
   let lowDetail = false, degraded = false;
@@ -235,8 +235,10 @@ function waspCreate(canvas) {
 
   // ---- contract ----------------------------------------------------------
   function resize() {
-    const size = sizeCanvasToDisplay(canvas, ctx, 2);
-    W = size.w; H = size.h;
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     computeNest();
   }
   function frame(t, mouse, pulses /* , look — fixed framing, ignored */) {

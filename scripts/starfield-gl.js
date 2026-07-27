@@ -77,11 +77,19 @@ function sfglCreate(canvas) {
   };
 
   // ---------------------------------------------------------------- GL setup
-  const gl = canvas.getContext('webgl2', {
-    alpha: false, antialias: false, depth: false, stencil: false,
-    powerPreference: 'high-performance',
-  });
-  if (!gl) return null;
+  let gl = null;
+  try {
+    gl = canvas.getContext('webgl2', {
+      alpha: false, antialias: false, depth: false, stencil: false,
+      powerPreference: 'high-performance',
+    });
+  } catch (err) {
+    console.warn('starfield-gl: webgl2 context request threw \u2014', err);
+  }
+  if (!gl) {
+    console.warn('starfield-gl: no WebGL2 context \u2014 falling back to 2D');
+    return null;
+  }
 
   // Capability probe — bloom (ROADMAP #1) needs renderable+filterable FP16.
   // WebGL2 makes RGBA16F filterable by default; renderability needs the ext.
@@ -506,13 +514,24 @@ void main(){
   }
   function program(vsSrc, fsSrc) {
     const p = gl.createProgram();
-    gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
-    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      throw new Error('link: ' + gl.getProgramInfoLog(p));
+    let vs = null, fs = null;
+    try {
+      vs = compile(gl.VERTEX_SHADER, vsSrc);
+      fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+      gl.attachShader(p, vs);
+      gl.attachShader(p, fs);
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        throw new Error('link: ' + gl.getProgramInfoLog(p));
+      }
+      return p;
+    } catch (err) {
+      gl.deleteProgram(p);       // a failed build must not leak GL objects
+      throw err;
+    } finally {
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
     }
-    return p;
   }
   // LINEAR-filtered 2D texture with the given wrap modes, left bound.
   function createTexture2D(wrapS, wrapT) {
@@ -1431,6 +1450,7 @@ void main(){
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
     contextLost = true;
+    console.warn('starfield-gl: WebGL context lost \u2014 paused until it is restored');
   });
   canvas.addEventListener('webglcontextrestored', () => {
     contextLost = false;
@@ -1441,7 +1461,14 @@ void main(){
     if (pulsesRef) pulsesRef.length = 0;
     wishQueue.length = 0;
     meteors.length = 0;
-    try { buildAll(); } catch (err) { contextLost = true; }
+    try {
+      buildAll();
+    } catch (err) {
+      // The context is back but the scene cannot be rebuilt: stay parked
+      // rather than drawing into a half-built pipeline.
+      contextLost = true;
+      console.error('starfield-gl: rebuild after context restore failed \u2014', err);
+    }
   });
 
   try {
@@ -1450,8 +1477,12 @@ void main(){
     console.warn('starfield-gl: init failed, falling back to 2D —', err);
     // The canvas is already claimed as webgl2; swap in a clone so the 2D
     // fallback can still call getContext('2d') on #starfield.
-    const fresh = canvas.cloneNode(false);
-    canvas.parentNode.replaceChild(fresh, canvas);
+    if (canvas.parentNode) {
+      const fresh = canvas.cloneNode(false);
+      canvas.parentNode.replaceChild(fresh, canvas);
+    } else {
+      console.warn('starfield-gl: canvas is detached \u2014 the 2D fallback has no canvas to claim');
+    }
     return null;
   }
 

@@ -1,0 +1,9 @@
+{
+  "name": "heyens-landing-page",
+  "private": true,
+  "description": "Tooling-only manifest: the site itself is dependency-free static HTML/CSS/JS.",
+  "scripts": {
+    "test": "node --test tests/",
+    "test:coverage": "node --test --experimental-test-coverage tests/"
+  }
+}
