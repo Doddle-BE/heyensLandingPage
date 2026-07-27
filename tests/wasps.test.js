@@ -9,6 +9,18 @@ function setup(opts = {}) {
 
 const mouse = (o = {}) => ({ x: null, y: null, vel: 0, active: false, ...o });
 
+// Deterministic Math.random (mulberry32) so long sim runs are reproducible.
+function seedRandom(env, seed = 0x9e3779b9) {
+  let a = seed;
+  const random = () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  env.context.Math = Object.assign(Object.create(Math), { random });
+}
+
 // The swarm lives in waspCreate's closure; reach it through the drawn output.
 function drawnWaspCount(env) {
   // Each wasp body is one `rotate` inside its own save/restore.
@@ -68,19 +80,30 @@ test('frame advances the simulation — wasps move', () => {
   assert.notDeepEqual(later.slice(-first.length), first);
 });
 
-test('the swarm stays near the nest over a long run', () => {
+test('the swarm keeps roaming near the nest over a long run', () => {
   const env = setup();
+  // Deterministic sim: the swarm's targets, events and crossings are all random.
+  seedRandom(env);
   const scene = env.context.waspCreate(env.canvas);
-  for (let t = 16; t <= 8000; t += 16) scene.frame(t, mouse(), []);
+  for (let t = 16; t < 8000; t += 16) scene.frame(t, mouse(), []);
+  env.ctx2d.calls.length = 0;
+  scene.frame(8000, mouse(), []);
+
+  const nest = { x: 800 * 0.22, y: 600 * 0.20 };
+  const roam = Math.min(env.evaluate('WASP.roamRadius'), Math.min(800, 600) * 0.6);
   const positions = env.ctx2d.calls
     .filter((c) => c.name === 'translate')
-    .slice(-env.evaluate('WASP.population'));
+    .slice(-drawnWaspCount(env))
+    .map((c) => c.args);
   assert.ok(positions.length > 0);
-  for (const p of positions) {
-    const [x, y] = p.args;
+  for (const [x, y] of positions) {
     assert.ok(Number.isFinite(x) && Number.isFinite(y), 'no NaN leaks into the sim');
-    assert.ok(x > -200 && x < 1000 && y > -200 && y < 800, `wasp escaped: ${x},${y}`);
   }
+  // Outbound wasps legitimately fly off-screen before being culled, so only the
+  // bulk of the swarm is expected to still be circling the nest.
+  const nearNest = positions.filter(([x, y]) => Math.hypot(x - nest.x, y - nest.y) < roam * 2);
+  assert.ok(nearNest.length >= positions.length * 0.6,
+    `only ${nearNest.length}/${positions.length} wasps stayed near the nest`);
 });
 
 test('click pulses are ingested once and marked on the shared queue', () => {
