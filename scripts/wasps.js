@@ -51,6 +51,10 @@ function waspCreate(canvas) {
   const coarse = matchMedia('(pointer: coarse)').matches;
 
   const nest = { x: 0, y: 0, r: 0, entry: { x: 0, y: 0 } };
+  // Eave the nest hangs from. Its underside runs from (0, nearY) to (midX, midY),
+  // then rises to the tip at tipX.
+  const branch = { midX: 0, tipX: 0, nearY: 60, midY: 44 };
+  const branchYAt = (x) => branch.nearY + (branch.midY - branch.nearY) * Math.min(1, Math.max(0, x / branch.midX));
   const wasps = [];
   const scatters = [];   // ingested click pulses, aged internally
 
@@ -65,8 +69,13 @@ function waspCreate(canvas) {
     // Narrow viewports carry the nest further from the left edge, otherwise the
     // swarm spends most of its time outside the canvas.
     const narrow = W < 700;
-    nest.x = W * (narrow ? 0.42 : 0.22); nest.y = H * (narrow ? 0.18 : 0.20);
+    nest.x = W * (narrow ? 0.42 : 0.22);
     nest.r = Math.max(46, Math.min(W, H) * 0.075);
+    // The eave always reaches past the nest so the stalk has something to hang from.
+    branch.midX = Math.max(W * 0.34, nest.x + W * 0.04);
+    branch.tipX = branch.midX + W * 0.08;
+    // Hang below the eave with room for the stalk, whatever the viewport height.
+    nest.y = Math.max(H * (narrow ? 0.18 : 0.20), branchYAt(nest.x) + nest.r + 26);
     nest.entry.x = nest.x; nest.entry.y = nest.y + nest.r * 0.92;
     // Keep the roam disc (flattened 0.8 in y) inside the viewport, allowing a
     // small overscan so the swarm still reads as unbounded at the edges.
@@ -244,13 +253,13 @@ function waspCreate(canvas) {
     const over = WASP.parallax + 2;
     ctx.save(); ctx.translate(ox, oy);
     ctx.fillStyle = '#5c5148';
-    ctx.beginPath(); ctx.moveTo(-over, -over); ctx.lineTo(W * 0.42, -over);
-    ctx.lineTo(W * 0.34, 44); ctx.lineTo(-over, 60); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-over, -over); ctx.lineTo(branch.tipX, -over);
+    ctx.lineTo(branch.midX, branch.midY); ctx.lineTo(-over, branch.nearY); ctx.closePath(); ctx.fill();
     ctx.restore();
 
     ctx.save(); ctx.translate(nest.x + ox, nest.y + oy);
     ctx.strokeStyle = '#6e6459'; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.moveTo(0, -nest.r - 30); ctx.lineTo(0, -nest.r * 0.7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, branchYAt(nest.x) - nest.y - 1); ctx.lineTo(0, -nest.r * 0.7); ctx.stroke();
     for (let i = 4; i >= 0; i--) {
       const r = nest.r * (0.55 + i * 0.11), c = 188 - i * 14;
       ctx.fillStyle = `rgb(${c},${c - 8},${c - 22})`;

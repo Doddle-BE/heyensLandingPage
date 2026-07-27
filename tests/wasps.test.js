@@ -193,6 +193,34 @@ test('an active cursor parallaxes the scene', () => {
   assert.ok(par.some(([x, y]) => x === -amp / 2 && y === -amp / 2), 'top-left cursor shifts the layer');
 });
 
+// Regression: the stalk was a fixed length, so on many viewports the nest hung
+// in mid-air below the eave instead of touching it.
+test('the nest stalk reaches the eave on every viewport', () => {
+  for (const [w, h] of [[1440, 900], [1920, 1080], [800, 600], [600, 900], [500, 400], [1200, 380]]) {
+    const env = setup();
+    env.context.innerWidth = w;
+    env.context.innerHeight = h;
+    const scene = env.context.waspCreate(env.canvas);
+    scene.resize();
+    env.ctx2d.calls.length = 0;
+    scene.frame(0, mouse(), []);
+
+    const translates = env.ctx2d.calls.filter((c) => c.name === 'translate').map((c) => c.args);
+    const [branchOx, branchOy] = translates[0];
+    const [nestX, nestY] = translates[1];
+    const eave = env.ctx2d.calls.filter((c) => c.name === 'lineTo').slice(0, 3).map((c) => c.args);
+    const [midX, midY] = eave[1];
+    const nearY = eave[2][1];
+    const stalkTop = env.ctx2d.calls.find((c) => c.name === 'moveTo' && c.args[0] === 0).args[1];
+
+    const localX = nestX - branchOx;
+    const underside = nearY + (midY - nearY) * (localX / midX);
+    const gap = (nestY + stalkTop) - (branchOy + underside);
+    assert.ok(gap <= 0 && gap > -8, `${w}x${h}: stalk is ${gap.toFixed(1)}px off the eave`);
+    assert.ok(localX < midX, `${w}x${h}: nest hangs past the eave`);
+  }
+});
+
 test('degrade trims the swarm once and refuses a second step', () => {
   const env = setup();
   const scene = env.context.waspCreate(env.canvas);
