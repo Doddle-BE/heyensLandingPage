@@ -106,6 +106,63 @@ test('the swarm keeps roaming near the nest over a long run', () => {
     `only ${nearNest.length}/${positions.length} wasps stayed near the nest`);
 });
 
+// Regression: `land` used to exit only within 8px of its surface point, which
+// separation (26px) could prevent forever, and cursor avoidance (130px) is wider
+// than the nest — parking the cursor on it stalled the whole swarm on the nest.
+test('a cursor resting on the nest does not strand the swarm on it', () => {
+  const env = setup();
+  seedRandom(env);
+  env.context.innerWidth = 1440;
+  env.context.innerHeight = 900;
+  const scene = env.context.waspCreate(env.canvas);
+  scene.resize();
+  const nest = { x: 1440 * 0.22, y: 900 * 0.20 };
+  const onNest = mouse({ x: nest.x, y: nest.y, active: true });
+  for (let t = 16; t < 60000; t += 16) scene.frame(t, onNest, []);
+
+  const sample = (t) => {
+    env.ctx2d.calls.length = 0;
+    scene.frame(t, onNest, []);
+    const n = drawnWaspCount(env);
+    return env.ctx2d.calls.filter((c) => c.name === 'translate').slice(-n).map((c) => c.args);
+  };
+  // Nest traffic is the liveness signal: a stalled swarm never launches again,
+  // so no wasp is ever seen in transit past the edge of the canvas.
+  let transitFrames = 0;
+  for (let t = 60000; t < 120000; t += 16) {
+    for (const [x, y] of sample(t)) {
+      if (x < -10 || x > 1450 || y < -10 || y > 910) { transitFrames++; break; }
+    }
+  }
+  assert.ok(transitFrames > 200,
+    `only ${transitFrames} frames with a wasp in transit — the swarm stalled on the nest`);
+});
+
+// Regression: only `roam` was contained, so wasps chasing the nest's entrance
+// arc trailed off the canvas (a quarter of resident wasp-frames at 390px wide).
+test('the swarm stays framed on a narrow viewport', () => {
+  const env = setup({ coarse: true });
+  seedRandom(env);
+  env.context.innerWidth = 390;
+  env.context.innerHeight = 740;
+  const scene = env.context.waspCreate(env.canvas);
+  scene.resize();
+  let inside = 0;
+  let total = 0;
+  for (let t = 16; t < 30000; t += 16) {
+    env.ctx2d.calls.length = 0;
+    scene.frame(t, mouse(), []);
+    const n = drawnWaspCount(env);
+    for (const [x, y] of env.ctx2d.calls.filter((c) => c.name === 'translate').slice(-n).map((c) => c.args)) {
+      total++;
+      if (x >= 0 && x <= 390 && y >= 0 && y <= 740) inside++;
+    }
+  }
+  assert.ok(total > 0);
+  // The rest are wasps deliberately in transit to or from the screen edge.
+  assert.ok(inside > total * 0.85, `only ${((inside / total) * 100).toFixed(1)}% of wasp-frames were on canvas`);
+});
+
 test('click pulses are ingested once and marked on the shared queue', () => {
   const env = setup();
   const scene = env.context.waspCreate(env.canvas);
