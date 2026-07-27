@@ -101,14 +101,17 @@ and applies vignette + grain directly.
 ## Project layout
 
 ```
-index.html              Entry point; loads the five scripts + stylesheet
+index.html              Entry point; loads the scripts + stylesheet
 styles/main.css         Layout, hint text, reduced-motion overlay
 scripts/
   starfield-gl.js       The WebGL2 renderer (camera, bake, stars, bloom, effects)
   starfield.js          2D <canvas> fallback renderer
+  wasps.js              2D <canvas> wasp-nest scene
   config.js             Tunables for the 2D fallback
   input.js              Pointer events → drag / click / pinch / wheel
-  main.js               Renderer selection, RAF loop, frame cap, reduced motion
+  scene.js              Shared scene runtime: RAF loop, frame cap, adaptive
+                        degrade, still frame, resize, hi-DPI canvas sizing
+  main.js               Scene dispatch (?scene=), renderer selection
 .github/workflows/      Deploy workflow (rsync on push to main)
 ROADMAP.md              Future ideas + recorded design decisions
 ```
