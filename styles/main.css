@@ -7,10 +7,12 @@ html, body {
   padding: 0;
   overflow: hidden;
   height: 100%;
-  background: #05060c;
-  color: #cfc7b4;
+  /* Wasps is the default scene, so its daylight palette is the base and the
+     sky's near-black is applied by class; nothing flashes before main.js runs. */
+  background: #cfe4f5;
+  color: #3c3428;
   font-family: ui-sans-serif, system-ui, sans-serif;
-  cursor: crosshair;
+  cursor: default;
   touch-action: none;          /* pointermove must stream during swipe-look */
   overscroll-behavior: none;
   -webkit-user-select: none;
@@ -22,7 +24,18 @@ body.grabbing {
 }
 
 canvas#starfield {
+  background: #cfe4f5;
+}
+
+/* Sky scene: main.js sets .scene-starfield on ?scene=starfield. */
+body.scene-starfield,
+body.scene-starfield canvas#starfield {
   background: #05060c;
+}
+
+body.scene-starfield {
+  color: #cfc7b4;
+  cursor: crosshair;
 }
 
 canvas {
@@ -43,8 +56,8 @@ canvas {
   font-size: 10px;
   letter-spacing: 3px;
   text-transform: uppercase;
-  color: rgba(240, 220, 180, 0.55);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+  color: rgba(52, 44, 32, 0.72);
+  text-shadow: 0 1px 6px rgba(255, 255, 255, 0.7);
   white-space: nowrap;
   pointer-events: none;
   transition: opacity 0.6s ease 0.4s;
@@ -56,6 +69,11 @@ canvas {
     font-size: 9px;
     letter-spacing: 1.5px;
   }
+}
+
+body.scene-starfield .hint {
+  color: rgba(240, 220, 180, 0.55);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
 }
 
 .hint.fade {
@@ -75,6 +93,15 @@ canvas {
 
   body.gl-still #reduced-motion-overlay {
     display: none;
+  }
+
+  /* The CSS star field belongs to the sky scene only. */
+  .static-stars {
+    display: none;
+  }
+
+  body.scene-starfield .static-stars {
+    display: block;
   }
 }
 
@@ -167,7 +194,7 @@ canvas {
     position: relative;
     margin: 0;
     text-align: center;
-    color: rgba(255, 220, 160, 0.5);
+    color: rgba(52, 44, 32, 0.72);
     font-family: system-ui, -apple-system, sans-serif;
     font-size: 13px;
     font-weight: 400;
@@ -177,8 +204,16 @@ canvas {
 
   #reduced-motion-overlay p span {
     display: block;
-    color: rgba(255, 255, 255, 0.2);
+    color: rgba(52, 44, 32, 0.45);
     font-size: 11px;
     margin-top: 2px;
+  }
+
+  body.scene-starfield #reduced-motion-overlay p {
+    color: rgba(255, 220, 160, 0.5);
+  }
+
+  body.scene-starfield #reduced-motion-overlay p span {
+    color: rgba(255, 255, 255, 0.2);
   }
 }

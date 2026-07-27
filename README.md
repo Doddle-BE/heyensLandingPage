@@ -1,17 +1,37 @@
-# ✦ heyens.be
+# 🐝 heyens.be
 
-A photoreal, interactive night sky you **float through** — built from scratch as a
-single WebGL2 renderer. No frameworks, no build step, no dependencies: just static
-HTML, CSS, and vanilla JavaScript.
+Two full-screen animated scenes, built from scratch with no frameworks, no build
+step and no dependencies: just static HTML, CSS, and vanilla JavaScript.
 
 **Live:** https://heyens.be
 
-The visitor drifts forward through a procedurally generated galaxy. Grab the sky and
-turn a full 360°, zoom in like a telescope, and click to send a wish across the stars.
-
 ---
 
-## Controls
+## Scenes
+
+Exactly one scene plays at a time; `?scene=` picks it and only that scene's
+renderer is downloaded.
+
+| URL | Scene |
+| --- | --- |
+| https://heyens.be | **Wasps** (default) — a daylight nest with a roaming swarm and in/out traffic, on a 2D canvas |
+| https://heyens.be/?scene=starfield | **Starfield** — the photoreal WebGL2 night sky you float through |
+
+### Wasp controls
+
+| Action | Mouse / trackpad | Touch |
+| --- | --- | --- |
+| Part the swarm | move the cursor | swipe |
+| Scatter them | click | tap |
+
+Wasps roam around the nest, dip in to land on it, arc at the entrance, and leave
+for the edge of the screen on a scheduled rhythm. Motion parameters and their
+evidence status live in [`docs/research/wasp-flight.md`](docs/research/wasp-flight.md).
+
+### Starfield controls
+
+The visitor drifts forward through a procedurally generated galaxy. Grab the sky and
+turn a full 360°, zoom in like a telescope, and click to send a wish across the stars.
 
 | Action | Mouse / trackpad | Touch |
 | --- | --- | --- |
@@ -34,8 +54,8 @@ python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
-(Opening `index.html` directly over `file://` also works — there are no modules or
-fetches — but a local server matches production.)
+(A local server is required: the active scene's renderer is appended as a script
+at runtime, which `file://` blocks.)
 
 ---
 

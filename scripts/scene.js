@@ -58,6 +58,23 @@ function createScene(factory, label) {
   }
 }
 
+// ---- Scene script loading ---------------------------------------------------
+// Renderers are plain globals (no build step), so the active scene's scripts are
+// appended at runtime and awaited: a visitor never downloads the other scene.
+const SCENE_SRC = {
+  wasps: ['scripts/wasps.js'],
+  starfield: ['scripts/starfield.js', 'scripts/starfield-gl.js'],
+};
+function loadSceneScripts(name) {
+  return Promise.all((SCENE_SRC[name] || []).map((src) => new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = resolve;
+    el.onerror = () => reject(new Error(src));
+    document.head.appendChild(el);
+  })));
+}
+
 function onDebouncedResize(handler, delay) {
   let timer = null;
   window.addEventListener('resize', () => {
