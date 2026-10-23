@@ -10,6 +10,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Build sharks
+        working-directory: sharks
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm run build
+
       - name: Set up SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -29,12 +40,5 @@ jobs:
         run: |
           rsync -avz --delete \
             -e "ssh -i ~/.ssh/id_deploy -p $DEPLOY_PORT" \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude '.gitignore' \
-            --exclude '.claude' \
-            --exclude '.worktrees' \
-            index.html \
-            styles \
-            scripts \
+            sharks/dist/ \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH"
