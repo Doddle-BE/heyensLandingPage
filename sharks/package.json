@@ -1,0 +1,21 @@
+{
+  "name": "ascii-aquarium",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 4480 --strictPort",
+    "preview": "vite preview --host 0.0.0.0 --port 4480 --strictPort",
+    "build": "vite build",
+    "test": "node --experimental-strip-types --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ascii-sharks": "github:stackedlol/ascii-sharks#c521e24a787e6d4cc460d4cf2b9815f25e4fe453"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "6.0.3",
+    "vite": "8.3.4"
+  }
+}

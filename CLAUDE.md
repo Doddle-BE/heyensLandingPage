@@ -5,6 +5,7 @@
 - Deploy status command: HTTP health check
 - Merge method: merge
 - Project type: static web app
+- Live content: `sharks/` (Vite app, copy of demo-lab `apps/ascii-sharks`). CI builds it, rsyncs `sharks/dist/`. Root `index.html`/`scripts`/`styles` (wasps/starfield) kept in repo, not deployed.
 
 ### Custom deploy hooks
 - Pre-merge: none
