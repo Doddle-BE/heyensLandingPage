@@ -1,3 +1,4 @@
+import { watchReducedMotion } from "./motionNotice.ts"
 import { paletteChoices } from "./palette.ts"
 import {
   DEFAULT_RAW,
@@ -55,6 +56,11 @@ if (!parsed.ok) {
 }
 
 const tank = createTank(canvas, parsed.settings)
+
+const motionNotice = document.querySelector("#motion-notice")
+if (motionNotice instanceof HTMLDialogElement) {
+  watchReducedMotion(motionNotice)
+}
 
 form.addEventListener("input", () => {
   syncOutputs(form)

@@ -123,6 +123,57 @@
         touch-action: manipulation;
       }
 
+      #motion-notice {
+        width: min(420px, calc(100vw - 32px));
+        padding: 22px 20px;
+        color: #d7e2ea;
+        background: #0b1218;
+        border: 1px solid #2a3c48;
+        border-radius: 8px;
+      }
+
+      #motion-notice::backdrop {
+        background: rgb(0 0 0 / 0.6);
+      }
+
+      #motion-notice h2 {
+        margin: 0 0 10px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+
+      #motion-notice p,
+      #motion-notice ul {
+        margin: 0 0 12px;
+        color: #9eb0bc;
+        font-size: 14px;
+      }
+
+      #motion-notice ul {
+        padding-left: 18px;
+      }
+
+      #motion-notice li + li {
+        margin-top: 4px;
+      }
+
+      #motion-notice strong {
+        color: #d7e2ea;
+        font-weight: 600;
+      }
+
+      #motion-notice button {
+        width: 100%;
+        margin-top: 4px;
+        padding: 9px 12px;
+        color: #1a1408;
+        background: #f4e2a4;
+        border: 0;
+        border-radius: 4px;
+        font: inherit;
+        cursor: pointer;
+      }
+
       @media (max-width: 719px) {
         body {
           grid-template-columns: 1fr;
@@ -183,6 +234,22 @@
       <button type="button" id="save">Save PNG</button>
     </form>
     <canvas id="ocean" aria-label="Aquarium"></canvas>
+    <dialog id="motion-notice" aria-labelledby="motion-notice-title">
+      <form method="dialog">
+        <h2 id="motion-notice-title">The sharks are holding still</h2>
+        <p>
+          Your device asks websites to reduce motion, so the aquarium is paused.
+          To watch them swim, turn that setting off:
+        </p>
+        <ul>
+          <li><strong>iPhone / iPad:</strong> Settings → Accessibility → Motion → Reduce Motion</li>
+          <li><strong>Mac:</strong> System Settings → Accessibility → Display → Reduce motion</li>
+          <li><strong>Android:</strong> Settings → Accessibility → Remove animations</li>
+          <li><strong>Windows:</strong> Settings → Accessibility → Visual effects → Animation effects</li>
+        </ul>
+        <button type="submit">Got it</button>
+      </form>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
